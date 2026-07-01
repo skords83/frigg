@@ -12,7 +12,7 @@ interface ContactsAppProps {
 }
 
 export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAppProps) {
-  const [contacts] = useState(initialContacts);
+  const [contacts, setContacts] = useState(initialContacts);
   const [addressbooks] = useState(initialAddressbooks);
   const [selected, setSelected] = useState<string | SmartCollection>('all');
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
@@ -42,6 +42,15 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
 
   const selectedContact = selectedUid ? contacts.find((c) => c.uid === selectedUid) ?? null : null;
 
+  function handleUpdate(updated: Contact) {
+    setContacts((prev) => prev.map((c) => (c.uid === updated.uid ? updated : c)));
+  }
+
+  function handleDelete(uid: string) {
+    setContacts((prev) => prev.filter((c) => c.uid !== uid));
+    setSelectedUid(null);
+  }
+
   return (
     <div className="grid h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 300px 1fr' }}>
       <Sidebar
@@ -60,7 +69,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         search={search}
         onSearchChange={setSearch}
       />
-      <DetailPane contact={selectedContact} />
+      <DetailPane contact={selectedContact} onUpdate={handleUpdate} onDelete={handleDelete} />
     </div>
   );
 }

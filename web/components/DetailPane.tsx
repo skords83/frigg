@@ -1,13 +1,19 @@
 'use client';
 
+import { useState } from 'react';
 import type { Contact } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
+import { EditModal } from './EditModal';
 
 interface DetailPaneProps {
   contact: Contact | null;
+  onUpdate?: (updated: Contact) => void;
+  onDelete?: (uid: string) => void;
 }
 
-export function DetailPane({ contact }: DetailPaneProps) {
+export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
+  const [editing, setEditing] = useState(false);
+
   if (!contact) {
     return (
       <div className="bg-surface flex items-center justify-center">
@@ -26,18 +32,30 @@ export function DetailPane({ contact }: DetailPaneProps) {
       method: 'DELETE',
       headers: { 'If-Match': contact.etag },
     });
-    window.location.reload();
+    if (onDelete) {
+      onDelete(contact.uid);
+    } else {
+      window.location.reload();
+    }
+  }
+
+  function handleSaved(updated: Contact) {
+    setEditing(false);
+    onUpdate?.(updated);
   }
 
   return (
     <div className="bg-surface overflow-y-auto px-14 py-12">
+      {editing && (
+        <EditModal contact={contact} onClose={() => setEditing(false)} onSave={handleSaved} />
+      )}
       {/* Header */}
       <div className="flex flex-col items-center text-center mb-9">
         <Seal initials={initials} size="lg" photoUrl={contact.photo_data_uri} />
         <h1 className="font-fraunces text-[26px] font-medium tracking-tight">{contact.fn}</h1>
         {roleLabel && <p className="text-[13px] text-muted mt-1">{roleLabel}</p>}
         <div className="flex gap-2.5 mt-5">
-          <ActionButton label="Bearbeiten" onClick={() => {}} />
+          <ActionButton label="Bearbeiten" onClick={() => setEditing(true)} />
           <ActionButton label="Teilen" onClick={() => {}} />
           <ActionButton label="Löschen" onClick={handleDelete} />
         </div>
