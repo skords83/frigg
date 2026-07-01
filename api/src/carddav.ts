@@ -74,17 +74,22 @@ export function parseVCard(raw: string): ParsedCard | null {
     const note = getStr('note') ?? null;
     const birthday = getStr('bday') ?? null;
 
-    // Photo — only inline base64
+    // Photo — data URI format (PHOTO:data:image/...) or traditional ENCODING=B
     let photo_data_uri: string | null = null;
     const photoProp = c.get('photo');
     if (photoProp) {
       const photoArr = Array.isArray(photoProp) ? photoProp : [photoProp];
       for (const p of photoArr) {
+        const val = String(p.valueOf());
+        if (val.startsWith('data:image/')) {
+          photo_data_uri = val;
+          break;
+        }
         const params = getPropParams(p);
         const encoding = String(params['ENCODING'] ?? params['encoding'] ?? '').toLowerCase();
         if (encoding === 'b' || encoding === 'base64') {
           const type = String(params['TYPE'] ?? params['type'] ?? 'jpeg').toLowerCase();
-          photo_data_uri = `data:image/${type};base64,${p.valueOf()}`;
+          photo_data_uri = `data:image/${type};base64,${val}`;
           break;
         }
       }
