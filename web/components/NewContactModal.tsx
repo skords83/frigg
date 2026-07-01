@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Contact, AddressBook, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter } from './form-helpers';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, birthdayToIso, normalizePhone } from './form-helpers';
 
 interface NewContactModalProps {
   addressbooks: AddressBook[];
@@ -43,9 +43,9 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
           family_name: familyName,
           org: org || null,
           title: title || null,
-          birthday: birthday || null,
+          birthday: birthday ? birthdayToIso(birthday) : null,
           note: note || null,
-          phones,
+          phones: phones.map((p) => ({ ...p, value: normalizePhone(p.value) })),
           emails,
           addresses,
         }),
@@ -122,7 +122,7 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
 
           {/* Geburtstag */}
           <FormSection label="Geburtstag">
-            <FormField label="JJJJ-MM-TT" value={birthday} onChange={setBirthday} />
+            <FormField label="TT.MM.JJJJ" value={birthday} onChange={setBirthday} />
           </FormSection>
 
           {/* Telefon */}
@@ -135,7 +135,7 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
                     className={inputCls + ' flex-1'}
                     value={p.value}
                     onChange={(e) => updatePhone(i, { ...p, value: e.target.value })}
-                    placeholder="+49 ..."
+                    placeholder="0178 ..."
                     type="tel"
                   />
                   <RemoveButton onClick={() => setPhones((prev) => prev.filter((_, j) => j !== i))} />

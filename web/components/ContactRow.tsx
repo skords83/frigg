@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import type { Contact } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 
@@ -14,8 +15,15 @@ export function ContactRow({ contact, selected, onClick, subOverride }: ContactR
   const initials = getInitials(contact.given_name, contact.family_name);
   const sub = subOverride ?? [contact.org, contact.title].filter(Boolean).join(' · ');
 
+  function handleDragStart(e: React.DragEvent) {
+    e.dataTransfer.setData('text/x-contact-uid', contact.uid);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
   return (
     <button
+      draggable
+      onDragStart={handleDragStart}
       onClick={onClick}
       aria-selected={selected}
       className={`w-full text-left flex items-center gap-2.5 px-4 py-2 border-l-2 transition-colors

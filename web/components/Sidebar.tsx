@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { AddressBook, SmartCollection } from '@/types/contact';
 
 interface SidebarProps {
@@ -11,6 +12,7 @@ interface SidebarProps {
   noPhotoCount: number;
   syncStatus: 'synced' | 'syncing' | 'error';
   onSync: () => void;
+  onMoveContact: (uid: string, targetBookId: string) => void;
 }
 
 export function Sidebar({
@@ -22,6 +24,7 @@ export function Sidebar({
   noPhotoCount,
   syncStatus,
   onSync,
+  onMoveContact,
 }: SidebarProps) {
   const allCount = addressbooks.reduce((sum, ab) => sum + ab.contact_count, 0);
 
@@ -54,6 +57,7 @@ export function Sidebar({
             count={ab.contact_count}
             active={selected === ab.id}
             onClick={() => onSelect(ab.id)}
+            onDrop={(uid) => onMoveContact(uid, ab.id)}
           />
         ))}
       </ul>
@@ -115,14 +119,27 @@ function SidebarItem({
   count,
   active,
   onClick,
+  onDrop,
 }: {
   label: string;
   count?: number;
   active: boolean;
   onClick: () => void;
+  onDrop?: (uid: string) => void;
 }) {
+  const [dragOver, setDragOver] = useState(false);
+
   return (
-    <li>
+    <li
+      onDragOver={onDrop ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
+      onDragLeave={onDrop ? () => setDragOver(false) : undefined}
+      onDrop={onDrop ? (e) => {
+        e.preventDefault();
+        setDragOver(false);
+        const uid = e.dataTransfer.getData('text/x-contact-uid');
+        if (uid) onDrop(uid);
+      } : undefined}
+    >
       <button
         role="option"
         aria-selected={active}
@@ -130,6 +147,8 @@ function SidebarItem({
         className={`w-full text-left px-2 py-1.5 rounded-md text-[13.5px] flex justify-between items-center transition-colors
           ${active
             ? 'bg-surface-raised text-foreground shadow-[inset_2px_0_0_var(--accent)]'
+            : dragOver
+            ? 'bg-surface-raised text-foreground ring-1 ring-inset ring-accent'
             : 'text-muted hover:bg-surface-raised hover:text-foreground'
           }`}
       >

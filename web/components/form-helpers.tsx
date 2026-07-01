@@ -1,3 +1,23 @@
+export function birthdayToDisplay(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  return `${m[3]}.${m[2]}.${m[1]}`;
+}
+
+export function birthdayToIso(display: string): string {
+  const m = display.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (!m) return display;
+  return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+}
+
+export function normalizePhone(v: string): string {
+  const s = v.trim();
+  if (!s) return s;
+  if (s.startsWith('00')) return '+' + s.slice(2);
+  if (s.startsWith('0')) return '+49' + s.slice(1);
+  return s;
+}
+
 export const inputCls =
   'bg-transparent border border-divider rounded-md px-2.5 py-1.5 text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:border-accent-dim transition-colors';
 

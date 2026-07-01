@@ -214,6 +214,67 @@ router.patch('/:uid/photo', async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/contacts/:uid/move — move to a different address book
+router.patch('/:uid/move', async (req: Request, res: Response) => {
+  try {
+    const { uid } = req.params;
+    const { addressbook_id: newBookId } = req.body as { addressbook_id?: string };
+    if (!newBookId) return res.status(400).json({ error: 'addressbook_id required' });
+
+    const [stored] = await query<{ etag: string; addressbook_id: string; raw_vcard: string }>(
+      'SELECT etag, addressbook_id, raw_vcard FROM contacts WHERE uid = $1',
+      [uid]
+    );
+    if (!stored) return res.status(404).json({ error: 'not found' });
+
+    if (stored.addressbook_id === newBookId) {
+      const [current] = await query<ContactRow>(
+        `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
+                birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+         FROM contacts WHERE uid = $1`,
+        [uid]
+      );
+      return res.json(current);
+    }
+
+    const [[oldBook], [newBook]] = await Promise.all([
+      query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]),
+      query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [newBookId]),
+    ]);
+    if (!newBook) return res.status(404).json({ error: 'target address book not found' });
+
+    const client = await getClient();
+
+    if (oldBook) {
+      await client.deleteVCard({ vCard: { url: `${oldBook.url}${uid}.vcf`, etag: stored.etag } as never });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const createResult: any = await client.createVCard({
+      addressBook: { url: newBook.url },
+      filename: `${uid}.vcf`,
+      vCardString: stored.raw_vcard,
+    });
+    const newEtag: string = createResult?.etag ?? stored.etag;
+
+    await pool.query(
+      'UPDATE contacts SET addressbook_id = $1, etag = $2, updated_at = now() WHERE uid = $3',
+      [newBookId, newEtag, uid]
+    );
+
+    const [updated] = await query<ContactRow>(
+      `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
+              birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+       FROM contacts WHERE uid = $1`,
+      [uid]
+    );
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
 // DELETE /api/contacts/:uid
 router.delete('/:uid', async (req: Request, res: Response) => {
   try {

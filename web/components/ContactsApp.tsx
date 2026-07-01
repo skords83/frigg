@@ -66,6 +66,21 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     setShowNewContact(false);
   }
 
+  async function moveContact(uid: string, targetBookId: string) {
+    try {
+      const res = await fetch(`/api/contacts/${encodeURIComponent(uid)}/move`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addressbook_id: targetBookId }),
+      });
+      if (!res.ok) return;
+      const updated: Contact = await res.json();
+      setContacts((prev) => prev.map((c) => (c.uid === uid ? updated : c)));
+    } catch {
+      // ignore
+    }
+  }
+
   async function handleSync() {
     if (syncStatus === 'syncing') return;
     setSyncStatus('syncing');
@@ -93,6 +108,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         noPhotoCount={noPhotoCount}
         syncStatus={syncStatus}
         onSync={handleSync}
+        onMoveContact={moveContact}
       />
       <ContactList
         contacts={filtered}

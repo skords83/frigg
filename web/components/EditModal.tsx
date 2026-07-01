@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import type { Contact, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter } from './form-helpers';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, birthdayToDisplay, birthdayToIso, normalizePhone } from './form-helpers';
 
 interface EditModalProps {
   contact: Contact;
@@ -16,7 +16,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
   const [familyName, setFamilyName] = useState(contact.family_name);
   const [org, setOrg] = useState(contact.org ?? '');
   const [title, setTitle] = useState(contact.title ?? '');
-  const [birthday, setBirthday] = useState(contact.birthday ?? '');
+  const [birthday, setBirthday] = useState(birthdayToDisplay(contact.birthday ?? ''));
   const [note, setNote] = useState(contact.note ?? '');
   const [phones, setPhones] = useState<PhoneEntry[]>(contact.phones);
   const [emails, setEmails] = useState<EmailEntry[]>(contact.emails);
@@ -68,9 +68,9 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
           family_name: familyName,
           org: org || null,
           title: title || null,
-          birthday: birthday || null,
+          birthday: birthday ? birthdayToIso(birthday) : null,
           note: note || null,
-          phones,
+          phones: phones.map((p) => ({ ...p, value: normalizePhone(p.value) })),
           emails,
           addresses,
         }),
@@ -184,7 +184,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
 
           {/* Geburtstag */}
           <FormSection label="Geburtstag">
-            <FormField label="JJJJ-MM-TT" value={birthday} onChange={setBirthday} />
+            <FormField label="TT.MM.JJJJ" value={birthday} onChange={setBirthday} />
           </FormSection>
 
           {/* Telefon */}
@@ -201,7 +201,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
                     className={inputCls + ' flex-1'}
                     value={p.value}
                     onChange={(e) => updatePhone(i, { ...p, value: e.target.value })}
-                    placeholder="+49 ..."
+                    placeholder="0178 ..."
                     type="tel"
                   />
                   <RemoveButton onClick={() => removePhone(i)} />
