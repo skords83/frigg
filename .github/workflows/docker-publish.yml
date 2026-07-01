@@ -62,7 +62,6 @@ jobs:
           envs: GHCR_TOKEN
           script: |
             set -e
-            docker network ls --format '{{.Name}}'
             STACK=/var/lib/docker/volumes/docker_dockhand_data/_data/stacks/VPS/frigg
             mkdir -p "$STACK"
             rm -f "$STACK/docker-compose.yml"

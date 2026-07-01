@@ -13,7 +13,7 @@ services:
       traefik.http.routers.frigg.tls.certresolver: letsencrypt
       traefik.http.services.frigg.loadbalancer.server.port: "3000"
     networks:
-      - traefik
+      - proxy
       - internal
 
   api:
@@ -51,7 +51,7 @@ services:
       - internal
 
 networks:
-  traefik:
+  proxy:
     external: true
   internal:
     driver: bridge
