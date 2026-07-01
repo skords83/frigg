@@ -172,7 +172,7 @@ export function patchVCard(raw: string, fields: Record<string, string>): string 
     if (value) {
       result = result.replace(
         /END:VCARD/i,
-        `${propName}:${escapeVCardValue(value)}\r\nEND:VCARD`
+        `${propName}:${value}\r\nEND:VCARD`
       );
     }
   }
@@ -180,10 +180,20 @@ export function patchVCard(raw: string, fields: Record<string, string>): string 
   return result;
 }
 
-function escapeVCardValue(value: string): string {
+// Escape a simple (non-structured) vCard property value.
+export function escapeVCardValue(value: string): string {
   return value
     .replace(/\\/g, '\\\\')
     .replace(/,/g, '\\,')
     .replace(/;/g, '\\;')
+    .replace(/\n/g, '\\n');
+}
+
+// Escape a single component of a structured property (N, ADR).
+// Does NOT escape ';' because ';' is the structural separator between components.
+export function escapeVCardComponent(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/,/g, '\\,')
     .replace(/\n/g, '\\n');
 }

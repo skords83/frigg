@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, pool } from '../db';
-import { getClient, parseVCard, patchVCard, patchPhotoInVCard } from '../carddav';
+import { getClient, parseVCard, patchVCard, patchPhotoInVCard, escapeVCardValue, escapeVCardComponent } from '../carddav';
 import type { ContactRow } from '../types';
 
 const router = Router();
@@ -98,18 +98,20 @@ router.put('/:uid', async (req: Request, res: Response) => {
 
     const { fn, given_name, family_name, org, title, birthday, note, phones, emails, addresses } = req.body;
 
-    // Patch only the known fields into the raw vCard (preserves unknown properties)
+    // Patch only the known fields into the raw vCard (preserves unknown properties).
+    // Each value is pre-escaped by the caller; patchVCard writes them as-is.
+    // Trailing backslashes are stripped from name fields to recover previously corrupted data.
     const patchFields: Record<string, string> = {};
-    if (fn !== undefined) patchFields['FN'] = fn;
+    if (fn !== undefined) patchFields['FN'] = escapeVCardValue((fn ?? '').replace(/\\+$/g, ''));
     if (given_name !== undefined || family_name !== undefined) {
-      const g = given_name ?? '';
-      const f = family_name ?? '';
+      const g = escapeVCardComponent(((given_name ?? '') as string).replace(/\\+$/g, ''));
+      const f = escapeVCardComponent(((family_name ?? '') as string).replace(/\\+$/g, ''));
       patchFields['N'] = `${f};${g};;;`;
     }
-    if (org !== undefined) patchFields['ORG'] = org;
-    if (title !== undefined) patchFields['TITLE'] = title;
-    if (birthday !== undefined) patchFields['BDAY'] = birthday;
-    if (note !== undefined) patchFields['NOTE'] = note;
+    if (org !== undefined) patchFields['ORG'] = org ? escapeVCardValue(org) : '';
+    if (title !== undefined) patchFields['TITLE'] = title ? escapeVCardValue(title) : '';
+    if (birthday !== undefined) patchFields['BDAY'] = birthday ?? '';
+    if (note !== undefined) patchFields['NOTE'] = note ? escapeVCardValue(note) : '';
 
     const newRawVcard = patchVCard(stored.raw_vcard, patchFields);
 
@@ -122,7 +124,8 @@ router.put('/:uid', async (req: Request, res: Response) => {
     const updateResult: any = await client.updateVCard({
       vCard: { url: vcardUrl, data: newRawVcard, etag: stored.etag },
     });
-    const newEtag = (updateResult?.etag as string | undefined) ?? stored.etag;
+    // tsdav returns a raw Fetch Response; the ETag is in the response headers
+    const newEtag: string = updateResult?.headers?.get?.('etag') ?? updateResult?.etag ?? stored.etag;
 
     // Rebuild the parsed data from the new raw vCard
     const parsed = parseVCard(newRawVcard);
@@ -191,7 +194,7 @@ router.patch('/:uid/photo', async (req: Request, res: Response) => {
     const updateResult: any = await client.updateVCard({
       vCard: { url: vcardUrl, data: newRawVcard, etag: stored.etag },
     });
-    const newEtag = (updateResult?.etag as string | undefined) ?? stored.etag;
+    const newEtag: string = updateResult?.headers?.get?.('etag') ?? updateResult?.etag ?? stored.etag;
 
     await pool.query(
       `UPDATE contacts SET etag = $1, photo_data_uri = $2, raw_vcard = $3, updated_at = now() WHERE uid = $4`,
