@@ -1,15 +1,14 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json ./
-COPY web/package.json ./web/
-COPY api/package.json ./api/
-RUN npm ci --workspace=web
+# Install web deps with project root at /app so next lands in /app/node_modules/
+# (not in a parent dir) — required for Next.js standalone trace to bundle it correctly
+COPY web/package.json ./
+RUN npm install
 
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY web/ ./web/
-WORKDIR /app/web
+COPY web/ ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
@@ -18,8 +17,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
-COPY --from=builder --chown=nextjs:nodejs /app/web/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/web/.next/static ./.next/static
+# standalone/ already includes the traced node_modules (next, react, …)
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
