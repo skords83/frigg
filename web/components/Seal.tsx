@@ -22,7 +22,7 @@ export function Seal({ initials, size = 'sm', photoUrl }: SealProps) {
     <div
       aria-hidden="true"
       className={`seal rounded-full flex items-center justify-center flex-shrink-0 font-fraunces text-accent
-        ${isLg ? 'seal-lg w-24 h-24 text-[34px] font-medium mb-4' : 'w-8 h-8 text-[12px]'}`}
+        ${isLg ? 'seal-lg w-24 h-24 text-[34px] font-medium' : 'w-8 h-8 text-[12px]'}`}
     >
       {initials}
     </div>

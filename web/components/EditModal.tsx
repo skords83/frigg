@@ -130,12 +130,11 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
         {/* Body */}
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
           {/* Avatar */}
-          <div className="flex flex-col items-center pt-1 pb-2">
+          <div className="flex flex-col items-center gap-2 pt-1 pb-2">
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="relative group"
-              title="Foto ändern"
             >
               <Seal
                 initials={getInitials(givenName, familyName)}
@@ -143,7 +142,10 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
                 photoUrl={photoPreview === 'remove' ? null : (photoPreview ?? contact.photo_data_uri)}
               />
               <span className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <span className="text-white text-[11px] font-mono tracking-wider">Foto</span>
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
               </span>
             </button>
             <input
@@ -157,7 +159,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
               <button
                 type="button"
                 onClick={() => setPhotoPreview('remove')}
-                className="mt-1.5 font-mono text-[10px] text-muted hover:text-red-400 transition-colors"
+                className="font-mono text-[10px] text-muted hover:text-red-400 transition-colors"
               >
                 Foto entfernen
               </button>
