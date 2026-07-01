@@ -42,6 +42,15 @@ jobs:
           tags: ghcr.io/${{ github.repository_owner }}/frigg-web:latest
           no-cache: true
 
+      - name: Copy docker-compose.yml to Sleipnir
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: docker-compose.yml
+          target: /var/lib/docker/volumes/docker_dockhand_data/_data/stacks/VPS/frigg/
+
       - name: Redeploy on Sleipnir
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -49,6 +58,9 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /var/lib/docker/volumes/docker_dockhand_data/_data/stacks/VPS/frigg
+            set -e
+            STACK=/var/lib/docker/volumes/docker_dockhand_data/_data/stacks/VPS/frigg
+            mkdir -p "$STACK"
+            cd "$STACK"
             docker compose pull
             docker compose up -d
