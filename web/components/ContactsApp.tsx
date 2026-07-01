@@ -5,6 +5,7 @@ import type { Contact, AddressBook, SmartCollection } from '@/types/contact';
 import { Sidebar } from './Sidebar';
 import { ContactList } from './ContactList';
 import { DetailPane } from './DetailPane';
+import { NewContactModal } from './NewContactModal';
 
 interface ContactsAppProps {
   initialContacts: Contact[];
@@ -18,6 +19,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [syncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
+  const [showNewContact, setShowNewContact] = useState(false);
 
   const filtered = useMemo(() => {
     let result = contacts;
@@ -51,8 +53,21 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     setSelectedUid(null);
   }
 
+  function handleCreate(contact: Contact) {
+    setContacts((prev) => [...prev, contact]);
+    setSelectedUid(contact.uid);
+    setShowNewContact(false);
+  }
+
   return (
     <div className="grid h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 300px 1fr' }}>
+      {showNewContact && (
+        <NewContactModal
+          addressbooks={addressbooks}
+          onClose={() => setShowNewContact(false)}
+          onCreate={handleCreate}
+        />
+      )}
       <Sidebar
         addressbooks={addressbooks}
         selected={selected}
@@ -68,6 +83,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         onSelect={setSelectedUid}
         search={search}
         onSearchChange={setSearch}
+        onNew={() => setShowNewContact(true)}
       />
       <DetailPane contact={selectedContact} onUpdate={handleUpdate} onDelete={handleDelete} />
     </div>

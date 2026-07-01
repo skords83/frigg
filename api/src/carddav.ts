@@ -148,6 +148,18 @@ function normalizeTypeLabel(type: string): string {
   return lower.replace(/,/g, '/') || 'sonstige';
 }
 
+export function patchPhotoInVCard(raw: string, photoDataUri: string): string {
+  let result = raw.replace(
+    /^PHOTO[;:][^\r\n]*(?:\r?\n[ \t][^\r\n]*)*/gim,
+    ''
+  );
+  result = result.replace(
+    /END:VCARD/i,
+    `PHOTO:${photoDataUri}\r\nEND:VCARD`
+  );
+  return result.replace(/(\r?\n){3,}/g, '\r\n');
+}
+
 export function patchVCard(raw: string, fields: Record<string, string>): string {
   let result = raw;
   for (const [key, value] of Object.entries(fields)) {

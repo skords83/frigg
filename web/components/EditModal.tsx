@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import type { Contact, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
+import { Seal, getInitials } from './Seal';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter } from './form-helpers';
 
 interface EditModalProps {
   contact: Contact;
@@ -19,19 +21,46 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
   const [phones, setPhones] = useState<PhoneEntry[]>(contact.phones);
   const [emails, setEmails] = useState<EmailEntry[]>(contact.emails);
   const [addresses, setAddresses] = useState<AddressEntry[]>(contact.addresses);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string;
+      setPhotoPreview(result);
+    };
+    reader.readAsDataURL(file);
+  }
 
   async function handleSave() {
     setSaving(true);
     setError(null);
-    const fn = `${givenName} ${familyName}`.trim() || familyName || givenName;
     try {
+      let currentContact = contact;
+
+      if (photoPreview) {
+        const photoRes = await fetch(`/api/contacts/${contact.uid}/photo`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            photo_data_uri: photoPreview === 'remove' ? null : photoPreview,
+          }),
+        });
+        if (!photoRes.ok) throw new Error(`Photo HTTP ${photoRes.status}`);
+        currentContact = await photoRes.json();
+      }
+
+      const fn = `${givenName} ${familyName}`.trim() || familyName || givenName;
       const res = await fetch(`/api/contacts/${contact.uid}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'If-Match': contact.etag,
+          'If-Match': currentContact.etag,
         },
         body: JSON.stringify({
           fn,
@@ -53,12 +82,8 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const updated: Contact = await res.json();
       onSave(updated);
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('HTTP')) {
-        setError('Speichern fehlgeschlagen. Bitte erneut versuchen.');
-      } else if (error === null) {
-        setError('Speichern fehlgeschlagen. Bitte erneut versuchen.');
-      }
+    } catch {
+      setError('Speichern fehlgeschlagen. Bitte erneut versuchen.');
     } finally {
       setSaving(false);
     }
@@ -104,6 +129,41 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
 
         {/* Body */}
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
+          {/* Avatar */}
+          <div className="flex flex-col items-center pt-1 pb-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="relative group"
+              title="Foto ändern"
+            >
+              <Seal
+                initials={getInitials(givenName, familyName)}
+                size="lg"
+                photoUrl={photoPreview === 'remove' ? null : (photoPreview ?? contact.photo_data_uri)}
+              />
+              <span className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <span className="text-white text-[11px] font-mono tracking-wider">Foto</span>
+              </span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            {photoPreview !== 'remove' && (photoPreview ?? contact.photo_data_uri) && (
+              <button
+                type="button"
+                onClick={() => setPhotoPreview('remove')}
+                className="mt-1.5 font-mono text-[10px] text-muted hover:text-red-400 transition-colors"
+              >
+                Foto entfernen
+              </button>
+            )}
+          </div>
+
           {/* Name */}
           <FormSection label="Name">
             <div className="grid grid-cols-2 gap-3">
@@ -234,91 +294,8 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
           </FormSection>
         </div>
 
-        {/* Footer */}
-        <div className="shrink-0 px-6 py-4 border-t border-divider flex flex-col gap-2">
-          {error && (
-            <p className="text-[12px] text-red-500 font-mono">{error}</p>
-          )}
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={onClose}
-              className="font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full border border-divider text-muted hover:border-accent-dim hover:text-accent transition-colors"
-            >
-              Abbrechen
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full bg-accent text-surface border border-accent hover:opacity-90 transition-opacity disabled:opacity-50"
-            >
-              {saving ? 'Speichern …' : 'Speichern'}
-            </button>
-          </div>
-        </div>
+        <ModalFooter error={error} saving={saving} onClose={onClose} onSave={handleSave} />
       </div>
     </div>
-  );
-}
-
-const inputCls =
-  'bg-transparent border border-divider rounded-md px-2.5 py-1.5 text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:border-accent-dim transition-colors';
-
-function FormSection({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h3 className="font-mono text-[10px] tracking-widest uppercase text-accent-dim mb-2.5 pb-1.5 border-b border-divider-soft">
-        {label}
-      </h3>
-      {children}
-    </div>
-  );
-}
-
-function FormField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <input
-      className={inputCls + ' w-full'}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={label}
-    />
-  );
-}
-
-function LabelSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
-  const allOptions = options.includes(value) ? options : [value, ...options];
-  return (
-    <select
-      className="bg-transparent border border-divider rounded-md px-2 py-1.5 text-[11px] font-mono text-muted focus:outline-none focus:border-accent-dim transition-colors w-[90px] shrink-0"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {allOptions.map((o) => (
-        <option key={o} value={o}>{o}</option>
-      ))}
-    </select>
-  );
-}
-
-function RemoveButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="text-muted hover:text-red-400 transition-colors w-6 h-6 flex items-center justify-center shrink-0 text-[16px]"
-      title="Entfernen"
-    >
-      −
-    </button>
-  );
-}
-
-function AddButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="font-mono text-[11px] tracking-wider text-muted hover:text-accent transition-colors flex items-center gap-1"
-    >
-      <span className="text-[16px] leading-none">+</span> Hinzufügen
-    </button>
   );
 }

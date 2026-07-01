@@ -16,9 +16,10 @@ interface ContactListProps {
   onSelect: (uid: string) => void;
   search: string;
   onSearchChange: (q: string) => void;
+  onNew: () => void;
 }
 
-export function ContactList({ contacts, selectedUid, onSelect, search, onSearchChange }: ContactListProps) {
+export function ContactList({ contacts, selectedUid, onSelect, search, onSearchChange, onNew }: ContactListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const letterRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -47,16 +48,23 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
 
   return (
     <div className="bg-bg border-r border-divider-soft flex flex-col">
-      {/* Search */}
-      <div className="px-4 pt-[18px] pb-3">
+      {/* Search + New */}
+      <div className="px-4 pt-[18px] pb-3 flex gap-2 items-center">
         <input
           type="search"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Suchen …"
           aria-label="Kontakte suchen"
-          className="w-full bg-surface border border-divider-soft rounded-lg px-3 py-2 text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:border-accent-dim"
+          className="flex-1 bg-surface border border-divider-soft rounded-lg px-3 py-2 text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:border-accent-dim"
         />
+        <button
+          onClick={onNew}
+          title="Neuer Kontakt"
+          className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-divider-soft text-muted hover:border-accent-dim hover:text-accent transition-colors text-[20px] leading-none pb-0.5"
+        >
+          +
+        </button>
       </div>
 
       {/* List + index rail */}

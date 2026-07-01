@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, pool } from '../db';
-import { getClient, parseVCard, patchVCard } from '../carddav';
+import { getClient, parseVCard, patchVCard, patchPhotoInVCard } from '../carddav';
 import type { ContactRow } from '../types';
 
 const router = Router();
@@ -148,6 +148,54 @@ router.put('/:uid', async (req: Request, res: Response) => {
         newRawVcard,
         req.params.uid,
       ]
+    );
+
+    const [updated] = await query<ContactRow>(
+      `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
+              birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+       FROM contacts WHERE uid = $1`,
+      [req.params.uid]
+    );
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+// PATCH /api/contacts/:uid/photo
+router.patch('/:uid/photo', async (req: Request, res: Response) => {
+  try {
+    const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string }>(
+      'SELECT etag, raw_vcard, addressbook_id FROM contacts WHERE uid = $1',
+      [req.params.uid]
+    );
+    if (!stored) return res.status(404).json({ error: 'not found' });
+
+    const { photo_data_uri } = req.body as { photo_data_uri?: string | null };
+    const removing = photo_data_uri === null || photo_data_uri === '';
+    if (!removing && !photo_data_uri?.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'invalid photo_data_uri' });
+    }
+
+    const newRawVcard = removing
+      ? stored.raw_vcard.replace(/^PHOTO[;:][^\r\n]*(?:\r?\n[ \t][^\r\n]*)*/gim, '').replace(/(\r?\n){3,}/g, '\r\n')
+      : patchPhotoInVCard(stored.raw_vcard, photo_data_uri!);
+
+    const client = await getClient();
+    const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
+    if (!book) return res.status(500).json({ error: 'address book not found' });
+
+    const vcardUrl = `${book.url}${req.params.uid}.vcf`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updateResult: any = await client.updateVCard({
+      vCard: { url: vcardUrl, data: newRawVcard, etag: stored.etag },
+    });
+    const newEtag = (updateResult?.etag as string | undefined) ?? stored.etag;
+
+    await pool.query(
+      `UPDATE contacts SET etag = $1, photo_data_uri = $2, raw_vcard = $3, updated_at = now() WHERE uid = $4`,
+      [newEtag, removing ? null : photo_data_uri, newRawVcard, req.params.uid]
     );
 
     const [updated] = await query<ContactRow>(
