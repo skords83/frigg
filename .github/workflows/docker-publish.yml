@@ -62,8 +62,10 @@ jobs:
           envs: GHCR_TOKEN
           script: |
             set -e
+            docker network ls --format '{{.Name}}'
             STACK=/var/lib/docker/volumes/docker_dockhand_data/_data/stacks/VPS/frigg
             mkdir -p "$STACK"
+            rm -f "$STACK/docker-compose.yml"
             cd "$STACK"
             echo "$GHCR_TOKEN" | docker login ghcr.io -u skords83 --password-stdin
             docker compose pull
