@@ -17,7 +17,7 @@ interface ContactsAppProps {
 export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAppProps) {
   const router = useRouter();
   const [contacts, setContacts] = useState(initialContacts);
-  const [addressbooks] = useState(initialAddressbooks);
+  const [addressbooks, setAddressbooks] = useState(initialAddressbooks);
   const [selected, setSelected] = useState<string | SmartCollection>('all');
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -68,6 +68,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
 
   async function moveContact(uid: string, targetBookId: string) {
     try {
+      const sourceBookId = contacts.find((c) => c.uid === uid)?.addressbook_id;
       const res = await fetch(`/api/contacts/${encodeURIComponent(uid)}/move`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -76,6 +77,13 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
       if (!res.ok) return;
       const updated: Contact = await res.json();
       setContacts((prev) => prev.map((c) => (c.uid === uid ? updated : c)));
+      if (sourceBookId && sourceBookId !== targetBookId) {
+        setAddressbooks((prev) => prev.map((ab) => {
+          if (ab.id === sourceBookId) return { ...ab, contact_count: ab.contact_count - 1 };
+          if (ab.id === targetBookId) return { ...ab, contact_count: ab.contact_count + 1 };
+          return ab;
+        }));
+      }
     } catch {
       // ignore
     }
