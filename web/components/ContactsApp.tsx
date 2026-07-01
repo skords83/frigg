@@ -76,7 +76,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   }
 
   return (
-    <div className="grid h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 300px 1fr' }}>
+    <div className="grid h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 300px 1fr', gridTemplateRows: '1fr' }}>
       {showNewContact && (
         <NewContactModal
           addressbooks={addressbooks}

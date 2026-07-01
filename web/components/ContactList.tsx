@@ -47,7 +47,7 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
   }
 
   return (
-    <div className="bg-bg border-r border-divider-soft flex flex-col">
+    <div className="bg-bg border-r border-divider-soft flex flex-col overflow-hidden">
       {/* Search + New */}
       <div className="px-4 pt-[18px] pb-3 flex gap-2 items-center">
         <input
