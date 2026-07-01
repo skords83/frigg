@@ -72,6 +72,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     const { ok } = await syncContacts();
     setSyncStatus(ok ? 'synced' : 'error');
     if (ok) router.refresh();
+    else setTimeout(() => setSyncStatus('synced'), 5000);
   }
 
   return (

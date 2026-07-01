@@ -96,7 +96,7 @@ export function Sidebar({
               : 'bg-red-500'
           }`}
         />
-        baikal.skords.de · {syncStatus === 'syncing' ? 'syncing…' : syncStatus}
+        baikal.skords.de · {syncStatus === 'syncing' ? 'syncing…' : syncStatus === 'error' ? 'Fehler · retry' : 'synced'}
       </button>
     </aside>
   );
