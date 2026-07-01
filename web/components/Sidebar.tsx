@@ -10,6 +10,7 @@ interface SidebarProps {
   birthdayCount: number;
   noPhotoCount: number;
   syncStatus: 'synced' | 'syncing' | 'error';
+  onSync: () => void;
 }
 
 export function Sidebar({
@@ -20,6 +21,7 @@ export function Sidebar({
   birthdayCount,
   noPhotoCount,
   syncStatus,
+  onSync,
 }: SidebarProps) {
   const allCount = addressbooks.reduce((sum, ab) => sum + ab.contact_count, 0);
 
@@ -80,9 +82,13 @@ export function Sidebar({
       </ul>
 
       {/* Footer sync status */}
-      <div className="mt-auto pt-3.5 border-t border-divider-soft flex items-center gap-1.5 font-mono text-[11px] text-muted">
+      <button
+        onClick={onSync}
+        disabled={syncStatus === 'syncing'}
+        className="mt-auto pt-3.5 border-t border-divider-soft flex items-center gap-1.5 font-mono text-[11px] text-muted w-full text-left hover:text-foreground transition-colors disabled:cursor-default cursor-pointer"
+      >
         <span
-          className={`w-1.5 h-1.5 rounded-full ${
+          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
             syncStatus === 'synced'
               ? 'bg-sage shadow-[0_0_6px_var(--sage)]'
               : syncStatus === 'syncing'
@@ -91,7 +97,7 @@ export function Sidebar({
           }`}
         />
         baikal.skords.de · {syncStatus === 'syncing' ? 'syncing…' : syncStatus}
-      </div>
+      </button>
     </aside>
   );
 }

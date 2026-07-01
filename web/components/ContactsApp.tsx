@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Contact, AddressBook, SmartCollection } from '@/types/contact';
+import { syncContacts } from '@/app/actions';
 import { Sidebar } from './Sidebar';
 import { ContactList } from './ContactList';
 import { DetailPane } from './DetailPane';
@@ -13,13 +15,18 @@ interface ContactsAppProps {
 }
 
 export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAppProps) {
+  const router = useRouter();
   const [contacts, setContacts] = useState(initialContacts);
   const [addressbooks] = useState(initialAddressbooks);
   const [selected, setSelected] = useState<string | SmartCollection>('all');
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [syncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [showNewContact, setShowNewContact] = useState(false);
+
+  useEffect(() => {
+    setContacts(initialContacts);
+  }, [initialContacts]);
 
   const filtered = useMemo(() => {
     let result = contacts;
@@ -59,6 +66,14 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     setShowNewContact(false);
   }
 
+  async function handleSync() {
+    if (syncStatus === 'syncing') return;
+    setSyncStatus('syncing');
+    const { ok } = await syncContacts();
+    setSyncStatus(ok ? 'synced' : 'error');
+    if (ok) router.refresh();
+  }
+
   return (
     <div className="grid h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 300px 1fr' }}>
       {showNewContact && (
@@ -76,6 +91,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         birthdayCount={birthdayCount}
         noPhotoCount={noPhotoCount}
         syncStatus={syncStatus}
+        onSync={handleSync}
       />
       <ContactList
         contacts={filtered}
