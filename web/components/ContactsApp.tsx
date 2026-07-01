@@ -101,6 +101,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         search={search}
         onSearchChange={setSearch}
         onNew={() => setShowNewContact(true)}
+        view={selected === 'birthdays' ? 'birthday' : 'default'}
       />
       <DetailPane contact={selectedContact} onUpdate={handleUpdate} onDelete={handleDelete} />
     </div>

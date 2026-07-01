@@ -49,6 +49,25 @@ body {
   border: 1px solid var(--divider-soft);
 }
 
+/* Scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--divider) transparent;
+}
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--divider);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-dim);
+}
+
 /* Brand mark ring */
 .brand-mark::after {
   content: '';

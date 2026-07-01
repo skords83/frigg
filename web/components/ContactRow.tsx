@@ -7,11 +7,12 @@ interface ContactRowProps {
   contact: Contact;
   selected: boolean;
   onClick: () => void;
+  subOverride?: string;
 }
 
-export function ContactRow({ contact, selected, onClick }: ContactRowProps) {
+export function ContactRow({ contact, selected, onClick, subOverride }: ContactRowProps) {
   const initials = getInitials(contact.given_name, contact.family_name);
-  const sub = [contact.org, contact.title].filter(Boolean).join(' · ');
+  const sub = subOverride ?? [contact.org, contact.title].filter(Boolean).join(' · ');
 
   return (
     <button
