@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #1b1f1d;
+  --surface: #20261f;
+  --surface-raised: #262d25;
+  --text: #e8e4d9;
+  --text-dim: #9ba396;
+  --accent: #c9a44c;
+  --accent-dim: #8a7239;
+  --sage: #6b8577;
+  --divider: #333b32;
+  --divider-soft: #2a3128;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Seal avatar — shared across list and detail */
+.seal {
+  background: linear-gradient(155deg, #2c342a, #1e241c);
+  border: 1px solid var(--divider);
+  position: relative;
+}
+.seal::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 0.5px solid rgba(201, 164, 76, 0.25);
+}
+.seal-lg::before {
+  inset: 6px;
+  border: 0.5px solid rgba(201, 164, 76, 0.3);
+}
+.seal-lg::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid var(--divider-soft);
+}
+
+/* Brand mark ring */
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid var(--divider);
+}

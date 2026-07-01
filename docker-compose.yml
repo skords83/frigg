@@ -1,0 +1,64 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:3001
+    depends_on:
+      - api
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.frigg.rule: Host(`contacts.skords.de`)
+      traefik.http.routers.frigg.entrypoints: websecure
+      traefik.http.routers.frigg.tls.certresolver: letsencrypt
+      traefik.http.services.frigg.loadbalancer.server.port: "3000"
+    networks:
+      - traefik
+      - internal
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://frigg:${POSTGRES_PASSWORD}@db:5432/frigg
+      CARDDAV_URL: ${CARDDAV_URL}
+      CARDDAV_USERNAME: ${CARDDAV_USERNAME}
+      CARDDAV_PASSWORD: ${CARDDAV_PASSWORD}
+      WEB_ORIGIN: https://contacts.skords.de
+      PORT: "3001"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: frigg
+      POSTGRES_USER: frigg
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U frigg"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+networks:
+  traefik:
+    external: true
+  internal:
+    driver: bridge
+
+volumes:
+  pg_data:

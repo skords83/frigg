@@ -1,0 +1,177 @@
+import { createDAVClient } from 'tsdav';
+import VCF from 'vcf';
+import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DAVClientInstance = any;
+
+let _client: DAVClientInstance = null;
+
+export async function getClient(): Promise<DAVClientInstance> {
+  if (_client) return _client;
+  _client = await createDAVClient({
+    serverUrl: process.env.CARDDAV_URL!,
+    credentials: {
+      username: process.env.CARDDAV_USERNAME!,
+      password: process.env.CARDDAV_PASSWORD!,
+    },
+    authMethod: 'Basic',
+    defaultAccountType: 'carddav',
+  });
+  return _client;
+}
+
+export interface ParsedCard {
+  uid: string;
+  fn: string;
+  given_name: string;
+  family_name: string;
+  org: string | null;
+  title: string | null;
+  birthday: string | null;
+  note: string | null;
+  photo_data_uri: string | null;
+  phones: PhoneEntry[];
+  emails: EmailEntry[];
+  addresses: AddressEntry[];
+  raw_vcard: string;
+}
+
+function getPropParams(prop: VCF.Property): Record<string, string | string[]> {
+  // vcf Property.toJSON() → [field, params, type, value]
+  return prop.toJSON()[1] as Record<string, string | string[]>;
+}
+
+function getTypeParam(prop: VCF.Property): string {
+  const params = getPropParams(prop);
+  const raw = params['TYPE'] ?? params['type'] ?? '';
+  return Array.isArray(raw) ? raw.join(',') : String(raw);
+}
+
+export function parseVCard(raw: string): ParsedCard | null {
+  try {
+    const cards = VCF.parse(raw);
+    if (!cards.length) return null;
+    const c = cards[0];
+
+    function getStr(key: string): string | null {
+      const p = c.get(key);
+      if (!p) return null;
+      return (Array.isArray(p) ? p[0] : p).valueOf() ?? null;
+    }
+
+    const uid = getStr('uid') ?? crypto.randomUUID();
+    const fn = getStr('fn') ?? '';
+
+    // N: family;given;additional;prefix;suffix
+    const nVal = getStr('n') ?? '';
+    const nParts = nVal.split(';');
+    const family_name = nParts[0]?.trim() ?? '';
+    const given_name = nParts[1]?.trim() ?? '';
+
+    const org = getStr('org')?.split(';')[0] ?? null;
+    const title = getStr('title') ?? null;
+    const note = getStr('note') ?? null;
+    const birthday = getStr('bday') ?? null;
+
+    // Photo — only inline base64
+    let photo_data_uri: string | null = null;
+    const photoProp = c.get('photo');
+    if (photoProp) {
+      const photoArr = Array.isArray(photoProp) ? photoProp : [photoProp];
+      for (const p of photoArr) {
+        const params = getPropParams(p);
+        const encoding = String(params['ENCODING'] ?? params['encoding'] ?? '').toLowerCase();
+        if (encoding === 'b' || encoding === 'base64') {
+          const type = String(params['TYPE'] ?? params['type'] ?? 'jpeg').toLowerCase();
+          photo_data_uri = `data:image/${type};base64,${p.valueOf()}`;
+          break;
+        }
+      }
+    }
+
+    // Phones
+    const phones: PhoneEntry[] = [];
+    const telProps = c.get('tel');
+    if (telProps) {
+      const arr = Array.isArray(telProps) ? telProps : [telProps];
+      for (const p of arr) {
+        phones.push({ label: normalizeTypeLabel(getTypeParam(p)), value: p.valueOf() });
+      }
+    }
+
+    // Emails
+    const emails: EmailEntry[] = [];
+    const emailProps = c.get('email');
+    if (emailProps) {
+      const arr = Array.isArray(emailProps) ? emailProps : [emailProps];
+      for (const p of arr) {
+        emails.push({ label: normalizeTypeLabel(getTypeParam(p)), value: p.valueOf() });
+      }
+    }
+
+    // Addresses
+    const addresses: AddressEntry[] = [];
+    const adrProps = c.get('adr');
+    if (adrProps) {
+      const arr = Array.isArray(adrProps) ? adrProps : [adrProps];
+      for (const p of arr) {
+        // ADR: PO Box;extended;street;city;state;zip;country
+        const parts = p.valueOf().split(';');
+        addresses.push({
+          label: normalizeTypeLabel(getTypeParam(p)),
+          street: parts[2]?.trim() ?? '',
+          city: parts[3]?.trim() ?? '',
+          state: parts[4]?.trim() || undefined,
+          zip: parts[5]?.trim() ?? '',
+          country: parts[6]?.trim() || undefined,
+        });
+      }
+    }
+
+    return {
+      uid, fn, given_name, family_name, org, title, birthday, note,
+      photo_data_uri, phones, emails, addresses, raw_vcard: raw,
+    };
+  } catch (err) {
+    console.error('vCard parse error', err);
+    return null;
+  }
+}
+
+function normalizeTypeLabel(type: string): string {
+  const lower = type.toLowerCase();
+  if (lower.includes('cell') || lower.includes('mobile')) return 'mobil';
+  if (lower.includes('work')) return 'arbeit';
+  if (lower.includes('home')) return 'privat';
+  if (lower.includes('fax')) return 'fax';
+  return lower.replace(/,/g, '/') || 'sonstige';
+}
+
+export function patchVCard(raw: string, fields: Record<string, string>): string {
+  let result = raw;
+  for (const [key, value] of Object.entries(fields)) {
+    const propName = key.toUpperCase();
+    // Remove existing lines for this property (handles multi-line folding)
+    result = result.replace(
+      new RegExp(`^${propName}[;:][^\r\n]*(?:\r?\n[ \t][^\r\n]*)*`, 'gim'),
+      ''
+    );
+    if (value) {
+      result = result.replace(
+        /END:VCARD/i,
+        `${propName}:${escapeVCardValue(value)}\r\nEND:VCARD`
+      );
+    }
+  }
+  result = result.replace(/(\r?\n){3,}/g, '\r\n');
+  return result;
+}
+
+function escapeVCardValue(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;')
+    .replace(/\n/g, '\\n');
+}
