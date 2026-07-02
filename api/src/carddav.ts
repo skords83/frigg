@@ -184,9 +184,36 @@ export function patchPhotoInVCard(raw: string, photoDataUri: string): string {
   return result.replace(/(\r?\n){3,}/g, '\r\n');
 }
 
-export function patchVCard(raw: string, fields: Record<string, string>): string {
+// Maps a Frigg label back to the vCard TYPE parameter value (case-insensitive).
+export function labelToVCardType(label: string): string {
+  const map: Record<string, string> = {
+    mobil: 'CELL',
+    arbeit: 'WORK',
+    privat: 'HOME',
+    iphone: 'IPHONE',
+    hauptnummer: 'MAIN',
+    sonstige: 'OTHER',
+    fax: 'FAX',
+  };
+  return map[label.toLowerCase()] ?? label.toUpperCase();
+}
+
+/**
+ * Patches scalar and multi-value properties in a raw vCard string.
+ *
+ * scalarFields: property-name → value (empty string removes the property)
+ * multiFields:  base property-name → array of complete "PROP;PARAMS:value" lines
+ *               (all existing lines for that property are replaced)
+ */
+export function patchVCard(
+  raw: string,
+  scalarFields: Record<string, string>,
+  multiFields?: Record<string, string[]>,
+): string {
   let result = raw;
-  for (const [key, value] of Object.entries(fields)) {
+
+  // Scalar fields: one line per property; empty value removes the property
+  for (const [key, value] of Object.entries(scalarFields)) {
     const propName = key.toUpperCase();
     // Remove existing lines for this property (handles multi-line folding)
     result = result.replace(
@@ -200,6 +227,25 @@ export function patchVCard(raw: string, fields: Record<string, string>): string 
       );
     }
   }
+
+  // Multi-value fields: remove all existing lines for the base property, then add new ones
+  if (multiFields) {
+    for (const [baseProp, lines] of Object.entries(multiFields)) {
+      const propName = baseProp.toUpperCase();
+      // Remove all existing lines for this base property (any TYPE/parameter combination)
+      result = result.replace(
+        new RegExp(`^${propName}[;:][^\r\n]*(?:\r?\n[ \t][^\r\n]*)*`, 'gim'),
+        ''
+      );
+      // Add each new line before END:VCARD
+      for (const line of lines) {
+        if (line) {
+          result = result.replace(/END:VCARD/i, `${line}\r\nEND:VCARD`);
+        }
+      }
+    }
+  }
+
   result = result.replace(/(\r?\n){3,}/g, '\r\n');
   return result;
 }

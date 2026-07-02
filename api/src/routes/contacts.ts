@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { query, pool } from '../db';
-import { getClient, parseVCard, patchVCard, patchPhotoInVCard, escapeVCardValue, escapeVCardComponent } from '../carddav';
+import { getClient, parseVCard, patchVCard, patchPhotoInVCard, escapeVCardValue, escapeVCardComponent, labelToVCardType } from '../carddav';
 import type { ContactRow } from '../types';
 
 const router = Router();
@@ -113,7 +113,26 @@ router.put('/:uid', async (req: Request, res: Response) => {
     if (birthday !== undefined) patchFields['BDAY'] = birthday ?? '';
     if (note !== undefined) patchFields['NOTE'] = note ? escapeVCardValue(note) : '';
 
-    const newRawVcard = patchVCard(stored.raw_vcard, patchFields);
+    // Multi-value fields: replace all TEL/EMAIL/ADR lines in the raw vCard so the
+    // CardDAV server gets the authoritative data (not stale values from a previous sync).
+    const multiFields: Record<string, string[]> = {};
+    if (phones !== undefined) {
+      multiFields['TEL'] = (phones as { label: string; value: string }[]).map(
+        (p) => `TEL;TYPE=${labelToVCardType(p.label)}:${escapeVCardValue(p.value)}`
+      );
+    }
+    if (emails !== undefined) {
+      multiFields['EMAIL'] = (emails as { label: string; value: string }[]).map(
+        (e) => `EMAIL;TYPE=${labelToVCardType(e.label)}:${escapeVCardValue(e.value)}`
+      );
+    }
+    if (addresses !== undefined) {
+      multiFields['ADR'] = (addresses as { label: string; street: string; city: string; state?: string; zip: string; country?: string }[]).map(
+        (a) => `ADR;TYPE=${labelToVCardType(a.label)}:;;${escapeVCardComponent(a.street)};${escapeVCardComponent(a.city)};${escapeVCardComponent(a.state ?? '')};${escapeVCardComponent(a.zip)};${escapeVCardComponent(a.country ?? '')}`
+      );
+    }
+
+    const newRawVcard = patchVCard(stored.raw_vcard, patchFields, multiFields);
 
     const client = await getClient();
     const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
