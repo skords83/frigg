@@ -1,0 +1,2 @@
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS href TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS contacts_href ON contacts (href) WHERE href IS NOT NULL;
