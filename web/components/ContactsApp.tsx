@@ -2,12 +2,15 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Contact, AddressBook, SmartCollection } from '@/types/contact';
+import type { Contact, AddressBook, SmartCollection, SmartGroup } from '@/types/contact';
 import { syncContacts } from '@/app/actions';
 import { Sidebar } from './Sidebar';
 import { ContactList } from './ContactList';
 import { DetailPane } from './DetailPane';
 import { NewContactModal } from './NewContactModal';
+import { GroupEditorModal } from './GroupEditorModal';
+import { DedupModal } from './DedupModal';
+import { useSmartGroups, applySmartGroup } from './useSmartGroups';
 
 interface ContactsAppProps {
   initialContacts: Contact[];
@@ -23,6 +26,10 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   const [search, setSearch] = useState('');
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [showNewContact, setShowNewContact] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<SmartGroup | null | 'new'>(null);
+  const [showDedup, setShowDedup] = useState(false);
+
+  const { groups: smartGroups, addGroup, updateGroup, deleteGroup } = useSmartGroups();
 
   useEffect(() => {
     setContacts(initialContacts);
@@ -36,11 +43,15 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
       result = contacts.filter((c) => c.birthday);
     } else if (selected === 'no-photo') {
       result = contacts.filter((c) => !c.photo_data_uri);
+    } else if (typeof selected === 'string' && selected.startsWith('group:')) {
+      const groupId = selected.slice(6);
+      const group = smartGroups.find((g) => g.id === groupId);
+      result = group ? applySmartGroup(contacts, group) : [];
     } else if (selected !== 'all') {
       result = contacts.filter((c) => c.addressbook_id === selected);
     }
     return result;
-  }, [contacts, selected]);
+  }, [contacts, selected, smartGroups]);
 
   const recentCount = useMemo(
     () => [...contacts].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 20).length,
@@ -48,6 +59,14 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   );
   const birthdayCount = useMemo(() => contacts.filter((c) => c.birthday).length, [contacts]);
   const noPhotoCount = useMemo(() => contacts.filter((c) => !c.photo_data_uri).length, [contacts]);
+
+  const groupCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const g of smartGroups) {
+      counts[g.id] = applySmartGroup(contacts, g).length;
+    }
+    return counts;
+  }, [contacts, smartGroups]);
 
   const selectedContact = selectedUid ? contacts.find((c) => c.uid === selectedUid) ?? null : null;
 
@@ -89,6 +108,12 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     }
   }
 
+  async function mergeContacts(keep: Contact, discard: Contact) {
+    await fetch(`/api/contacts/${encodeURIComponent(discard.uid)}`, { method: 'DELETE' });
+    setContacts((prev) => prev.filter((c) => c.uid !== discard.uid));
+    if (selectedUid === discard.uid) setSelectedUid(keep.uid);
+  }
+
   async function handleSync() {
     if (syncStatus === 'syncing') return;
     setSyncStatus('syncing');
@@ -107,6 +132,23 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
           onCreate={handleCreate}
         />
       )}
+      {showDedup && (
+        <DedupModal
+          contacts={contacts}
+          onMerge={mergeContacts}
+          onClose={() => setShowDedup(false)}
+        />
+      )}
+      {editingGroup !== null && (
+        <GroupEditorModal
+          initial={editingGroup === 'new' ? undefined : (editingGroup as SmartGroup)}
+          onSave={(g) => {
+            editingGroup === 'new' ? addGroup(g) : updateGroup(g);
+            setEditingGroup(null);
+          }}
+          onClose={() => setEditingGroup(null)}
+        />
+      )}
       <Sidebar
         addressbooks={addressbooks}
         selected={selected}
@@ -117,6 +159,15 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         syncStatus={syncStatus}
         onSync={handleSync}
         onMoveContact={moveContact}
+        smartGroups={smartGroups}
+        groupCounts={groupCounts}
+        onNewGroup={() => setEditingGroup('new')}
+        onEditGroup={(g) => setEditingGroup(g)}
+        onDeleteGroup={(id) => {
+          deleteGroup(id);
+          if (selected === `group:${id}`) setSelected('all');
+        }}
+        onDedup={() => setShowDedup(true)}
       />
       <ContactList
         contacts={filtered}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { AddressBook, SmartCollection } from '@/types/contact';
+import type { AddressBook, SmartCollection, SmartGroup } from '@/types/contact';
 
 interface SidebarProps {
   addressbooks: AddressBook[];
@@ -13,6 +13,12 @@ interface SidebarProps {
   syncStatus: 'synced' | 'syncing' | 'error';
   onSync: () => void;
   onMoveContact: (uid: string, targetBookId: string) => void;
+  smartGroups: SmartGroup[];
+  groupCounts: Record<string, number>;
+  onNewGroup: () => void;
+  onEditGroup: (group: SmartGroup) => void;
+  onDeleteGroup: (id: string) => void;
+  onDedup: () => void;
 }
 
 export function Sidebar({
@@ -25,6 +31,12 @@ export function Sidebar({
   syncStatus,
   onSync,
   onMoveContact,
+  smartGroups,
+  groupCounts,
+  onNewGroup,
+  onEditGroup,
+  onDeleteGroup,
+  onDedup,
 }: SidebarProps) {
   const allCount = addressbooks.reduce((sum, ab) => sum + ab.contact_count, 0);
 
@@ -85,6 +97,41 @@ export function Sidebar({
         />
       </ul>
 
+      {/* Smart groups */}
+      <div className="flex items-center justify-between mt-5 mb-2 px-2">
+        <p className="font-mono text-[10px] tracking-widest uppercase text-muted">Gruppen</p>
+        <button
+          onClick={onNewGroup}
+          className="text-muted hover:text-foreground text-[16px] leading-none transition-colors"
+          title="Neue Gruppe"
+        >+</button>
+      </div>
+      {smartGroups.length === 0 && (
+        <p className="text-[12px] text-muted px-2 italic">Keine Gruppen</p>
+      )}
+      <ul role="listbox" aria-label="Gruppen">
+        {smartGroups.map((g) => (
+          <GroupItem
+            key={g.id}
+            group={g}
+            count={groupCounts[g.id] ?? 0}
+            active={selected === `group:${g.id}`}
+            onClick={() => onSelect(`group:${g.id}`)}
+            onEdit={() => onEditGroup(g)}
+            onDelete={() => onDeleteGroup(g.id)}
+          />
+        ))}
+      </ul>
+
+      {/* Dedup trigger */}
+      <button
+        onClick={onDedup}
+        className="mt-4 text-left px-2 py-1.5 rounded-md text-[13px] text-muted hover:bg-surface-raised hover:text-foreground transition-colors w-full flex items-center gap-2"
+      >
+        <span className="opacity-50 text-[11px]">⊕</span>
+        Duplikate prüfen
+      </button>
+
       {/* Footer sync status */}
       <button
         onClick={onSync}
@@ -111,6 +158,67 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <p className="font-mono text-[10px] tracking-widest uppercase text-muted px-2 mb-2 mt-5">
       {children}
     </p>
+  );
+}
+
+function GroupItem({
+  group,
+  count,
+  active,
+  onClick,
+  onEdit,
+  onDelete,
+}: {
+  group: SmartGroup;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  return (
+    <li className="relative">
+      <button
+        role="option"
+        aria-selected={active}
+        onClick={onClick}
+        onContextMenu={(e) => { e.preventDefault(); setMenuOpen(true); }}
+        className={`w-full text-left px-2 py-1.5 rounded-md text-[13.5px] flex justify-between items-center transition-colors group ${
+          active
+            ? 'bg-surface-raised text-foreground shadow-[inset_2px_0_0_var(--accent)]'
+            : 'text-muted hover:bg-surface-raised hover:text-foreground'
+        }`}
+      >
+        <span className="flex items-center gap-1.5">
+          <span className="opacity-50 text-[11px]">◆</span>
+          {group.name}
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="font-mono text-[10.5px] text-muted opacity-70">{count}</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+            className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-[14px] leading-none px-0.5"
+          >⋯</button>
+        </span>
+      </button>
+      {menuOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+          <div className="absolute left-2 top-full z-50 mt-0.5 bg-surface border border-divider rounded-lg shadow-lg py-1 min-w-[120px]">
+            <button
+              onClick={() => { setMenuOpen(false); onEdit(); }}
+              className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-surface-raised transition-colors"
+            >Bearbeiten</button>
+            <button
+              onClick={() => { setMenuOpen(false); onDelete(); }}
+              className="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:bg-surface-raised transition-colors"
+            >Löschen</button>
+          </div>
+        </>
+      )}
+    </li>
   );
 }
 

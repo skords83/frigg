@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
+import Fuse from 'fuse.js';
 import type { Contact } from '@/types/contact';
 import { ContactRow } from './ContactRow';
 import { IndexRail } from './IndexRail';
@@ -24,21 +25,27 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
   const scrollRef = useRef<HTMLDivElement>(null);
   const letterRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
-  const filtered = contacts.filter((c) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      c.fn.toLowerCase().includes(q) ||
-      c.given_name.toLowerCase().includes(q) ||
-      c.family_name.toLowerCase().includes(q) ||
-      c.org?.toLowerCase().includes(q) ||
-      c.emails.some((e) => e.value.toLowerCase().includes(q)) ||
-      c.phones.some((p) => p.value.includes(q))
-    );
-  });
+  const fuse = useMemo(() => new Fuse(contacts, {
+    keys: [
+      { name: 'family_name', weight: 3 },
+      { name: 'given_name', weight: 2 },
+      { name: 'fn', weight: 2 },
+      { name: 'org', weight: 1 },
+      { name: 'emails.value', weight: 1 },
+      { name: 'phones.value', weight: 1 },
+    ],
+    threshold: 0.35,
+    includeScore: true,
+    ignoreLocation: true,
+  }), [contacts]);
 
-  const grouped = groupByLetter(filtered);
-  const available = new Set(grouped.map((g) => g.letter));
+  const filtered = useMemo(() => {
+    if (!search) return contacts;
+    return fuse.search(search).map((r) => r.item);
+  }, [contacts, search, fuse]);
+
+  const grouped = search ? null : groupByLetter(filtered);
+  const available = new Set(grouped?.map((g) => g.letter) ?? []);
 
   function scrollToLetter(letter: string) {
     const el = letterRefs.current.get(letter);
@@ -113,34 +120,51 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
   return (
     <div className="bg-bg border-r border-divider-soft flex flex-col overflow-hidden">
       {searchBar}
-      {/* List + index rail */}
-      <div className="flex flex-1 overflow-hidden">
-        <div ref={scrollRef} className="flex-1 overflow-y-auto">
-          {grouped.length === 0 && (
+      {search ? (
+        /* Fuzzy search results — flat, ranked by relevance */
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length === 0 && (
             <p className="text-muted text-[13px] px-4 py-8 text-center">Keine Kontakte gefunden</p>
           )}
-          {grouped.map(({ letter, contacts: group }) => (
-            <div key={letter}>
-              <div
-                ref={(el) => { if (el) letterRefs.current.set(letter, el); }}
-                className="font-mono text-[10.5px] tracking-widest text-accent-dim px-4 pt-3.5 pb-1.5"
-                aria-hidden="true"
-              >
-                {letter}
-              </div>
-              {group.map((c) => (
-                <ContactRow
-                  key={c.uid}
-                  contact={c}
-                  selected={c.uid === selectedUid}
-                  onClick={() => onSelect(c.uid)}
-                />
-              ))}
-            </div>
+          {filtered.map((c) => (
+            <ContactRow
+              key={c.uid}
+              contact={c}
+              selected={c.uid === selectedUid}
+              onClick={() => onSelect(c.uid)}
+            />
           ))}
         </div>
-        <IndexRail available={available} onSelect={scrollToLetter} />
-      </div>
+      ) : (
+        /* Normal grouped view + index rail */
+        <div className="flex flex-1 overflow-hidden">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+            {(grouped ?? []).length === 0 && (
+              <p className="text-muted text-[13px] px-4 py-8 text-center">Keine Kontakte gefunden</p>
+            )}
+            {(grouped ?? []).map(({ letter, contacts: group }) => (
+              <div key={letter}>
+                <div
+                  ref={(el) => { if (el) letterRefs.current.set(letter, el); }}
+                  className="font-mono text-[10.5px] tracking-widest text-accent-dim px-4 pt-3.5 pb-1.5"
+                  aria-hidden="true"
+                >
+                  {letter}
+                </div>
+                {group.map((c) => (
+                  <ContactRow
+                    key={c.uid}
+                    contact={c}
+                    selected={c.uid === selectedUid}
+                    onClick={() => onSelect(c.uid)}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+          <IndexRail available={available} onSelect={scrollToLetter} />
+        </div>
+      )}
     </div>
   );
 }

@@ -44,3 +44,23 @@ export interface AddressBook {
 }
 
 export type SmartCollection = 'all' | 'recent' | 'birthdays' | 'no-photo';
+
+export type GroupRuleField =
+  | 'family_name' | 'given_name' | 'fn' | 'org' | 'title' | 'note'
+  | 'emails' | 'phones' | 'addresses.city' | 'addresses.country' | 'addresses.zip'
+  | 'birthday';
+
+export type GroupRuleOperator = 'contains' | 'equals' | 'starts_with' | 'is_empty' | 'is_not_empty';
+
+export interface GroupRule {
+  field: GroupRuleField;
+  operator: GroupRuleOperator;
+  value: string;
+}
+
+export interface SmartGroup {
+  id: string;
+  name: string;
+  rules: GroupRule[];
+  match: 'all' | 'any';
+}
