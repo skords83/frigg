@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { Contact } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 import { EditModal } from './EditModal';
@@ -61,9 +61,9 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
         </div>
       </div>
 
-      <div className="max-w-[900px] grid grid-cols-1 xl:grid-cols-2 gap-x-14 gap-y-6">
+      <div className="max-w-[900px] grid grid-cols-1 xl:grid-cols-2 xl:gap-x-0 gap-x-14 gap-y-6">
         {/* Linke Spalte: Telefon + E-Mail */}
-        <div className="space-y-6">
+        <div className="space-y-6 xl:pr-7">
           {contact.phones.length > 0 && (
             <FieldGroup label="Telefon">
               {contact.phones.map((p, i) => (
@@ -86,7 +86,7 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
         </div>
 
         {/* Rechte Spalte: Adresse + Sonstiges + Notiz */}
-        <div className="space-y-6">
+        <div className="space-y-6 xl:pl-7 xl:border-l xl:border-divider-soft">
           {contact.addresses.length > 0 && (
             <FieldGroup label="Adresse">
               {contact.addresses.map((a, i) => (
@@ -115,13 +115,33 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
 
           {contact.note && (
             <FieldGroup label="Notiz">
-              <p className="text-[13px] text-muted italic leading-relaxed">{contact.note}</p>
+              <p className="text-[13px] text-muted italic leading-relaxed">{renderNoteWithLinks(contact.note)}</p>
             </FieldGroup>
           )}
         </div>
       </div>
     </div>
   );
+}
+
+function renderNoteWithLinks(note: string): React.ReactNode {
+  const urlRegex = /https?:\/\/[^\s]+/g;
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  let match;
+  let key = 0;
+  while ((match = urlRegex.exec(note)) !== null) {
+    if (match.index > last) parts.push(note.slice(last, match.index));
+    const url = match[0];
+    parts.push(
+      <a key={key++} href={url} target="_blank" rel="noopener noreferrer" className="not-italic underline underline-offset-2 hover:text-accent transition-colors">
+        {url}
+      </a>
+    );
+    last = match.index + url.length;
+  }
+  if (last < note.length) parts.push(note.slice(last));
+  return <>{parts}</>;
 }
 
 function FieldGroup({ label, children }: { label: string; children: React.ReactNode }) {

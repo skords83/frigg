@@ -36,13 +36,16 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
     ],
     threshold: 0.35,
     includeScore: true,
+    includeMatches: true,
     ignoreLocation: true,
   }), [contacts]);
 
-  const filtered = useMemo(() => {
-    if (!search) return contacts;
-    return fuse.search(search).map((r) => r.item);
+  const searchResults = useMemo(() => {
+    if (!search) return null;
+    return fuse.search(search);
   }, [contacts, search, fuse]);
+
+  const filtered = searchResults ? searchResults.map((r) => r.item) : contacts;
 
   const grouped = search ? null : groupByLetter(filtered);
   const available = new Set(grouped?.map((g) => g.letter) ?? []);
@@ -137,12 +140,14 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
           {filtered.length === 0 && (
             <p className="text-muted text-[13px] px-4 py-8 text-center">Keine Kontakte gefunden</p>
           )}
-          {filtered.map((c) => (
+          {searchResults!.map((r) => (
             <ContactRow
-              key={c.uid}
-              contact={c}
-              selected={c.uid === selectedUid}
-              onClick={() => onSelect(c.uid)}
+              key={r.item.uid}
+              contact={r.item}
+              selected={r.item.uid === selectedUid}
+              onClick={() => onSelect(r.item.uid)}
+              search={search}
+              searchMatches={r.matches}
             />
           ))}
         </div>
