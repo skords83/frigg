@@ -56,14 +56,25 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
 
   const searchBar = (
     <div className="px-4 pt-[18px] pb-3 flex gap-2 items-center">
-      <input
-        type="search"
-        value={search}
-        onChange={(e) => onSearchChange(e.target.value)}
-        placeholder="Suchen …"
-        aria-label="Kontakte suchen"
-        className="flex-1 bg-surface border border-divider-soft rounded-lg px-3 py-2 text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:border-accent-dim"
-      />
+      <div className="relative flex-1">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Suchen …"
+          aria-label="Kontakte suchen"
+          className="w-full bg-surface border border-divider-soft rounded-lg px-3 py-2 pr-7 text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:border-accent focus:shadow-[0_0_0_1px_var(--accent)] transition-shadow"
+        />
+        {search && (
+          <button
+            onClick={() => onSearchChange('')}
+            aria-label="Suche löschen"
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-foreground transition-colors text-[16px] leading-none"
+          >
+            ×
+          </button>
+        )}
+      </div>
       <button
         onClick={onNew}
         title="Neuer Kontakt"
@@ -142,11 +153,11 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
             {(grouped ?? []).length === 0 && (
               <p className="text-muted text-[13px] px-4 py-8 text-center">Keine Kontakte gefunden</p>
             )}
-            {(grouped ?? []).map(({ letter, contacts: group }) => (
+            {(grouped ?? []).map(({ letter, contacts: group }, idx) => (
               <div key={letter}>
                 <div
                   ref={(el) => { if (el) letterRefs.current.set(letter, el); }}
-                  className="font-mono text-[10.5px] tracking-widest text-accent-dim px-4 pt-3.5 pb-1.5"
+                  className={`font-mono text-[10.5px] tracking-widest text-accent-dim px-4 pb-1.5 ${idx === 0 ? 'pt-3.5' : 'pt-3 mt-1 border-t border-divider-soft'}`}
                   aria-hidden="true"
                 >
                   {letter}

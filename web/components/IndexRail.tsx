@@ -18,7 +18,7 @@ export function IndexRail({ available, onSelect }: IndexRailProps) {
             onClick={() => has && onSelect(letter)}
             aria-label={`Springe zu ${letter}`}
             disabled={!has}
-            className={`font-mono text-[9px] w-full h-[14px] flex items-center justify-center rounded-[3px] transition-colors
+            className={`font-mono text-[9px] w-full h-[16px] flex items-center justify-center rounded-[3px] transition-colors
               ${has
                 ? 'text-muted hover:bg-surface-raised hover:text-accent cursor-pointer'
                 : 'text-muted opacity-20 cursor-default'
