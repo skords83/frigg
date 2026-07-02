@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { SmartGroup, GroupRule, GroupRuleField, GroupRuleOperator } from '@/types/contact';
+import { useModalClose } from './form-helpers';
 
 interface GroupEditorModalProps {
   initial?: SmartGroup;
@@ -46,6 +47,7 @@ export function GroupEditorModal({ initial, onSave, onClose }: GroupEditorModalP
   const [match, setMatch] = useState<'all' | 'any'>(initial?.match ?? 'all');
   const [rules, setRules] = useState<GroupRule[]>(initial?.rules.length ? initial.rules : [emptyRule()]);
   const [error, setError] = useState<string | null>(null);
+  const { closing, requestClose } = useModalClose(onClose);
 
   function updateRule(i: number, patch: Partial<GroupRule>) {
     setRules((prev) => prev.map((r, j) => j === i ? { ...r, ...patch } : r));
@@ -61,27 +63,27 @@ export function GroupEditorModal({ initial, onSave, onClose }: GroupEditorModalP
     const invalid = rules.find((r) => !VALUE_LESS.includes(r.operator) && !r.value.trim());
     if (invalid) { setError('Bitte alle Regelwerte ausfüllen.'); return; }
 
-    onSave({
+    requestClose(() => onSave({
       id: initial?.id ?? crypto.randomUUID(),
       name: name.trim(),
       match,
       rules,
-    });
+    }));
   }
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className={`modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/40 ${closing ? 'closing' : ''}`}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}
     >
-      <div className="bg-surface w-full max-w-md rounded-xl shadow-2xl overflow-hidden flex flex-col">
+      <div className={`modal-panel bg-surface w-full max-w-md rounded-xl shadow-2xl overflow-hidden flex flex-col ${closing ? 'closing' : ''}`}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-divider shrink-0">
           <h2 className="font-fraunces text-[18px] font-medium">
             {initial ? 'Gruppe bearbeiten' : 'Neue Gruppe'}
           </h2>
           <button
-            onClick={onClose}
-            className="text-muted hover:text-foreground w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
+            onClick={() => requestClose()}
+            className="press text-muted hover:text-foreground w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
           >✕</button>
         </div>
 
@@ -176,12 +178,12 @@ export function GroupEditorModal({ initial, onSave, onClose }: GroupEditorModalP
 
         <div className="flex justify-end gap-2 px-6 py-4 border-t border-divider shrink-0">
           <button
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-md text-[13px] text-muted hover:text-foreground hover:bg-surface-raised transition-colors"
+            onClick={() => requestClose()}
+            className="press px-4 py-1.5 rounded-md text-[13px] text-muted hover:text-foreground hover:bg-surface-raised transition-colors"
           >Abbrechen</button>
           <button
             onClick={handleSave}
-            className="px-4 py-1.5 rounded-md text-[13px] bg-accent text-white hover:bg-accent-dim transition-colors"
+            className="press px-4 py-1.5 rounded-md text-[13px] bg-accent text-white hover:bg-accent-dim transition-colors"
           >Speichern</button>
         </div>
       </div>

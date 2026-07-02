@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Contact, AddressBook, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, birthdayToIso, normalizePhone } from './form-helpers';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToIso, normalizePhone } from './form-helpers';
 
 interface NewContactModalProps {
   addressbooks: AddressBook[];
@@ -23,6 +23,7 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
   const [addresses, setAddresses] = useState<AddressEntry[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { closing, requestClose } = useModalClose(onClose);
 
   async function handleSave() {
     if (!givenName.trim() && !familyName.trim() && !org.trim()) {
@@ -52,7 +53,7 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const created: Contact = await res.json();
-      onCreate(created);
+      requestClose(() => onCreate(created));
     } catch {
       setError('Kontakt konnte nicht erstellt werden. Bitte erneut versuchen.');
     } finally {
@@ -72,16 +73,16 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className={`modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/40 ${closing ? 'closing' : ''}`}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}
     >
-      <div className="bg-surface w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl shadow-2xl overflow-hidden">
+      <div className={`modal-panel bg-surface w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl shadow-2xl overflow-hidden ${closing ? 'closing' : ''}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-divider shrink-0">
           <h2 className="font-fraunces text-[18px] font-medium">Neuer Kontakt</h2>
           <button
-            onClick={onClose}
-            className="text-muted hover:text-foreground transition-colors w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
+            onClick={() => requestClose()}
+            className="press text-muted hover:text-foreground transition-colors w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
           >
             ✕
           </button>
@@ -198,7 +199,7 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
           </FormSection>
         </div>
 
-        <ModalFooter error={error} saving={saving} onClose={onClose} onSave={handleSave} saveLabel="Erstellen" />
+        <ModalFooter error={error} saving={saving} onClose={() => requestClose()} onSave={handleSave} saveLabel="Erstellen" />
       </div>
     </div>
   );

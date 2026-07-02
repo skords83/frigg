@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react';
 import type { Contact, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, birthdayToDisplay, birthdayToIso, normalizePhone } from './form-helpers';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToDisplay, birthdayToIso, normalizePhone } from './form-helpers';
 
 interface EditModalProps {
   contact: Contact;
@@ -25,6 +25,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { closing, requestClose } = useModalClose(onClose);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -81,7 +82,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const updated: Contact = await res.json();
-      onSave(updated);
+      requestClose(() => onSave(updated));
     } catch {
       setError('Speichern fehlgeschlagen. Bitte erneut versuchen.');
     } finally {
@@ -112,16 +113,16 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className={`modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/40 ${closing ? 'closing' : ''}`}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}
     >
-      <div className="bg-surface w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl shadow-2xl overflow-hidden">
+      <div className={`modal-panel bg-surface w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl shadow-2xl overflow-hidden ${closing ? 'closing' : ''}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-divider shrink-0">
           <h2 className="font-fraunces text-[18px] font-medium">Kontakt bearbeiten</h2>
           <button
-            onClick={onClose}
-            className="text-muted hover:text-foreground transition-colors w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
+            onClick={() => requestClose()}
+            className="press text-muted hover:text-foreground transition-colors w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
           >
             ✕
           </button>
@@ -134,7 +135,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="relative group"
+              className="press relative group"
             >
               <Seal
                 initials={getInitials(givenName, familyName)}
@@ -296,7 +297,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
           </FormSection>
         </div>
 
-        <ModalFooter error={error} saving={saving} onClose={onClose} onSave={handleSave} />
+        <ModalFooter error={error} saving={saving} onClose={() => requestClose()} onSave={handleSave} />
       </div>
     </div>
   );

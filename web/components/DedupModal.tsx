@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import type { Contact } from '@/types/contact';
 import { findDuplicates, type DuplicatePair } from './dedup';
+import { useModalClose } from './form-helpers';
 
 interface DedupModalProps {
   contacts: Contact[];
@@ -14,6 +15,7 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
   const pairs = useMemo(() => findDuplicates(contacts), [contacts]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [merging, setMerging] = useState<string | null>(null);
+  const { closing, requestClose } = useModalClose(onClose);
 
   const visible = pairs.filter((p) => !dismissed.has(pairKey(p)));
 
@@ -35,10 +37,10 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className={`modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/40 ${closing ? 'closing' : ''}`}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}
     >
-      <div className="bg-surface w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl shadow-2xl overflow-hidden">
+      <div className={`modal-panel bg-surface w-full max-w-2xl max-h-[85vh] flex flex-col rounded-xl shadow-2xl overflow-hidden ${closing ? 'closing' : ''}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-divider shrink-0">
           <div>
@@ -50,8 +52,8 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
             </p>
           </div>
           <button
-            onClick={onClose}
-            className="text-muted hover:text-foreground w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
+            onClick={() => requestClose()}
+            className="press text-muted hover:text-foreground w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
           >✕</button>
         </div>
 
@@ -120,8 +122,8 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
 
         <div className="px-6 py-3 border-t border-divider shrink-0 flex justify-end">
           <button
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-md text-[13px] text-muted hover:text-foreground hover:bg-surface-raised transition-colors"
+            onClick={() => requestClose()}
+            className="press px-4 py-1.5 rounded-md text-[13px] text-muted hover:text-foreground hover:bg-surface-raised transition-colors"
           >Schließen</button>
         </div>
       </div>

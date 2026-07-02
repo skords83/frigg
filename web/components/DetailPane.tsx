@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import type { Contact } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 import { EditModal } from './EditModal';
@@ -13,6 +13,7 @@ interface DetailPaneProps {
 
 export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
   const [editing, setEditing] = useState(false);
+  const editBtnRef = useRef<HTMLButtonElement>(null);
 
   if (!contact) {
     return (
@@ -42,82 +43,90 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
   function handleSaved(updated: Contact) {
     setEditing(false);
     onUpdate?.(updated);
+    setTimeout(() => editBtnRef.current?.focus(), 0);
+  }
+
+  function handleClose() {
+    setEditing(false);
+    setTimeout(() => editBtnRef.current?.focus(), 0);
   }
 
   return (
     <div className="bg-surface overflow-y-auto px-14 py-12">
       {editing && (
-        <EditModal contact={contact} onClose={() => setEditing(false)} onSave={handleSaved} />
+        <EditModal contact={contact} onClose={handleClose} onSave={handleSaved} />
       )}
-      {/* Header */}
-      <div className="flex flex-col items-center text-center mb-9">
-        <Seal initials={initials} size="lg" photoUrl={contact.photo_data_uri} />
-        <h1 className="font-fraunces text-[26px] font-medium tracking-tight">{contact.fn}</h1>
-        {roleLabel && <p className="text-[13px] text-muted mt-1">{roleLabel}</p>}
-        <div className="flex gap-2.5 mt-5">
-          <ActionButton label="Bearbeiten" onClick={() => setEditing(true)} variant="primary" />
-          <ActionButton label="Teilen" onClick={() => {}} />
-          <ActionButton label="Löschen" onClick={handleDelete} variant="danger" />
-        </div>
-      </div>
-
-      <div className="max-w-[900px] grid grid-cols-1 xl:grid-cols-2 xl:gap-x-0 gap-x-14 gap-y-6">
-        {/* Linke Spalte: Telefon + E-Mail */}
-        <div className="space-y-6 xl:pr-7">
-          {contact.phones.length > 0 && (
-            <FieldGroup label="Telefon">
-              {contact.phones.map((p, i) => (
-                <FieldRow key={i} tag={p.label}>
-                  <a href={`tel:${p.value}`} className="text-sage hover:underline">{p.value}</a>
-                </FieldRow>
-              ))}
-            </FieldGroup>
-          )}
-
-          {contact.emails.length > 0 && (
-            <FieldGroup label="E-Mail">
-              {contact.emails.map((e, i) => (
-                <FieldRow key={i} tag={e.label}>
-                  <a href={`mailto:${e.value}`} className="text-sage hover:underline">{e.value}</a>
-                </FieldRow>
-              ))}
-            </FieldGroup>
-          )}
+      <div key={contact.uid} className="detail-enter">
+        {/* Header */}
+        <div className="flex flex-col items-center text-center mb-9">
+          <Seal initials={initials} size="lg" photoUrl={contact.photo_data_uri} />
+          <h1 className="font-fraunces text-[26px] font-medium tracking-tight">{contact.fn}</h1>
+          {roleLabel && <p className="text-[13px] text-muted mt-1">{roleLabel}</p>}
+          <div className="flex gap-2.5 mt-5">
+            <ActionButton ref={editBtnRef} label="Bearbeiten" onClick={() => setEditing(true)} variant="primary" />
+            <ActionButton label="Teilen" onClick={() => {}} />
+            <ActionButton label="Löschen" onClick={handleDelete} variant="danger" />
+          </div>
         </div>
 
-        {/* Rechte Spalte: Adresse + Sonstiges + Notiz */}
-        <div className="space-y-6 xl:pl-7 xl:border-l xl:border-divider-soft">
-          {contact.addresses.length > 0 && (
-            <FieldGroup label="Adresse">
-              {contact.addresses.map((a, i) => (
-                <FieldRow key={i} tag={a.label}>
-                  <span>
-                    {a.street}
-                    {a.street && <br />}
-                    {[a.zip, a.city].filter(Boolean).join(' ')}
-                    {a.country && <><br />{a.country}</>}
-                  </span>
-                </FieldRow>
-              ))}
-            </FieldGroup>
-          )}
+        <div className="max-w-[900px] grid grid-cols-1 xl:grid-cols-2 xl:gap-x-0 gap-x-14 gap-y-6">
+          {/* Linke Spalte: Telefon + E-Mail */}
+          <div className="space-y-6 xl:pr-7">
+            {contact.phones.length > 0 && (
+              <FieldGroup label="Telefon">
+                {contact.phones.map((p, i) => (
+                  <FieldRow key={i} tag={p.label}>
+                    <a href={`tel:${p.value}`} className="text-sage hover:underline">{p.value}</a>
+                  </FieldRow>
+                ))}
+              </FieldGroup>
+            )}
 
-          {(contact.birthday || contact.org) && (
-            <FieldGroup label="Sonstiges">
-              {contact.birthday && (
-                <FieldRow tag="Geburtstag">{formatBirthday(contact.birthday)}</FieldRow>
-              )}
-              {contact.org && (
-                <FieldRow tag="Firma">{contact.org}</FieldRow>
-              )}
-            </FieldGroup>
-          )}
+            {contact.emails.length > 0 && (
+              <FieldGroup label="E-Mail">
+                {contact.emails.map((e, i) => (
+                  <FieldRow key={i} tag={e.label}>
+                    <a href={`mailto:${e.value}`} className="text-sage hover:underline">{e.value}</a>
+                  </FieldRow>
+                ))}
+              </FieldGroup>
+            )}
+          </div>
 
-          {contact.note && (
-            <FieldGroup label="Notiz">
-              <p className="text-[13px] text-muted italic leading-relaxed">{renderNoteWithLinks(contact.note)}</p>
-            </FieldGroup>
-          )}
+          {/* Rechte Spalte: Adresse + Sonstiges + Notiz */}
+          <div className="space-y-6 xl:pl-7 xl:border-l xl:border-divider-soft">
+            {contact.addresses.length > 0 && (
+              <FieldGroup label="Adresse">
+                {contact.addresses.map((a, i) => (
+                  <FieldRow key={i} tag={a.label}>
+                    <span>
+                      {a.street}
+                      {a.street && <br />}
+                      {[a.zip, a.city].filter(Boolean).join(' ')}
+                      {a.country && <><br />{a.country}</>}
+                    </span>
+                  </FieldRow>
+                ))}
+              </FieldGroup>
+            )}
+
+            {(contact.birthday || contact.org) && (
+              <FieldGroup label="Sonstiges">
+                {contact.birthday && (
+                  <FieldRow tag="Geburtstag">{formatBirthday(contact.birthday)}</FieldRow>
+                )}
+                {contact.org && (
+                  <FieldRow tag="Firma">{contact.org}</FieldRow>
+                )}
+              </FieldGroup>
+            )}
+
+            {contact.note && (
+              <FieldGroup label="Notiz">
+                <p className="text-[13px] text-muted italic leading-relaxed">{renderNoteWithLinks(contact.note)}</p>
+              </FieldGroup>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -164,21 +173,24 @@ function FieldRow({ tag, children }: { tag: string; children: React.ReactNode })
   );
 }
 
-function ActionButton({ label, onClick, variant = 'default' }: { label: string; onClick: () => void; variant?: 'primary' | 'danger' | 'default' }) {
-  const styles: Record<string, string> = {
-    primary: 'border-accent-dim text-accent bg-[rgba(201,164,76,0.08)] hover:bg-[rgba(201,164,76,0.15)] hover:border-accent',
-    danger: 'border-divider text-muted hover:border-red-500/50 hover:text-red-400',
-    default: 'border-divider text-muted hover:border-accent-dim hover:text-accent',
-  };
-  return (
-    <button
-      onClick={onClick}
-      className={`font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full border transition-colors ${styles[variant]}`}
-    >
-      {label}
-    </button>
-  );
-}
+const ActionButton = React.forwardRef<HTMLButtonElement, { label: string; onClick: () => void; variant?: 'primary' | 'danger' | 'default' }>(
+  function ActionButton({ label, onClick, variant = 'default' }, ref) {
+    const styles: Record<string, string> = {
+      primary: 'border-accent-dim text-accent bg-[rgba(201,164,76,0.08)] hover:bg-[rgba(201,164,76,0.15)] hover:border-accent',
+      danger: 'border-divider text-muted hover:border-red-500/50 hover:text-red-400',
+      default: 'border-divider text-muted hover:border-accent-dim hover:text-accent',
+    };
+    return (
+      <button
+        ref={ref}
+        onClick={onClick}
+        className={`press font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full border transition-colors ${styles[variant]}`}
+      >
+        {label}
+      </button>
+    );
+  }
+);
 
 function formatBirthday(raw: string): string {
   // Normalize YYYYMMDD (Apple compact format) to YYYY-MM-DD first

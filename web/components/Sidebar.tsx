@@ -136,7 +136,7 @@ export function Sidebar({
       <button
         onClick={onSync}
         disabled={syncStatus === 'syncing'}
-        className="mt-auto pt-3.5 border-t border-divider-soft flex items-center gap-1.5 font-mono text-[11px] text-muted w-full text-left hover:text-foreground transition-colors disabled:cursor-default cursor-pointer"
+        className="press mt-auto pt-3.5 border-t border-divider-soft flex items-center gap-1.5 font-mono text-[11px] text-muted w-full text-left hover:text-foreground transition-colors disabled:cursor-default cursor-pointer"
       >
         <span
           className={`w-1.5 h-1.5 rounded-full shrink-0 ${
@@ -206,7 +206,7 @@ function GroupItem({
       {menuOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-          <div className="absolute left-2 top-full z-50 mt-0.5 bg-surface border border-divider rounded-lg shadow-lg py-1 min-w-[120px]">
+          <div className="popover-in absolute left-2 top-full z-50 mt-0.5 bg-surface border border-divider rounded-lg shadow-lg py-1 min-w-[120px]">
             <button
               onClick={() => { setMenuOpen(false); onEdit(); }}
               className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-surface-raised transition-colors"

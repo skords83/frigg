@@ -81,7 +81,7 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
       <button
         onClick={onNew}
         title="Neuer Kontakt"
-        className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-divider-soft text-muted hover:border-accent-dim hover:text-accent transition-colors text-[20px] leading-none pb-0.5"
+        className="press flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-divider-soft text-muted hover:border-accent-dim hover:text-accent transition-colors text-[20px] leading-none pb-0.5"
       >
         +
       </button>

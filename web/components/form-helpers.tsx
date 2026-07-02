@@ -1,5 +1,17 @@
 import { useState, useRef, type ReactNode } from 'react';
 
+/** Shared enter/exit timing for the four modals — waits out the CSS exit animation before unmounting. */
+export function useModalClose(onClose: () => void, duration = 130) {
+  const [closing, setClosing] = useState(false);
+
+  function requestClose(after: () => void = onClose) {
+    setClosing(true);
+    setTimeout(after, duration);
+  }
+
+  return { closing, requestClose };
+}
+
 export function birthdayToDisplay(iso: string): string {
   // YYYY-MM-DD
   let m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -144,14 +156,14 @@ export function ModalFooter({
       <div className="flex justify-end gap-3">
         <button
           onClick={onClose}
-          className="font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full border border-divider text-muted hover:border-accent-dim hover:text-accent transition-colors"
+          className="press font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full border border-divider text-muted hover:border-accent-dim hover:text-accent transition-colors"
         >
           Abbrechen
         </button>
         <button
           onClick={onSave}
           disabled={saving}
-          className="font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full bg-accent text-surface border border-accent hover:opacity-90 transition-opacity disabled:opacity-50"
+          className="press font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full bg-accent text-surface border border-accent hover:opacity-90 transition-opacity disabled:opacity-50"
         >
           {saving ? `${saveLabel} …` : saveLabel}
         </button>
