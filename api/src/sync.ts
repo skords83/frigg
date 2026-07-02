@@ -39,7 +39,8 @@ async function upsertContact(
        addresses       = EXCLUDED.addresses,
        raw_vcard       = EXCLUDED.raw_vcard,
        updated_at      = now()
-     WHERE contacts.etag IS DISTINCT FROM EXCLUDED.etag`,
+     WHERE contacts.etag IS DISTINCT FROM EXCLUDED.etag
+        OR contacts.href IS DISTINCT FROM EXCLUDED.href`,
     [
       parsed.uid,
       bookId,
