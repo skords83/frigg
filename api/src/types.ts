@@ -20,6 +20,7 @@ export interface AddressEntry {
 export interface ContactRow {
   uid: string;
   addressbook_id: string;
+  href: string | null;
   etag: string;
   fn: string;
   given_name: string;
