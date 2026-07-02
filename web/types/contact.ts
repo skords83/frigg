@@ -28,12 +28,16 @@ export interface Contact {
   title: string | null;
   birthday: string | null;
   note: string | null;
-  photo_data_uri: string | null;
+  has_photo: boolean;
   phones: PhoneEntry[];
   emails: EmailEntry[];
   addresses: AddressEntry[];
   created_at: string;
   updated_at: string;
+}
+
+export function contactPhotoUrl(contact: Pick<Contact, 'uid' | 'has_photo'>): string | null {
+  return contact.has_photo ? `/api/contacts/${contact.uid}/photo` : null;
 }
 
 export interface AddressBook {

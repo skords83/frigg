@@ -120,7 +120,7 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
                   key={contact.uid}
                   contact={contact}
                   selected={contact.uid === selectedUid}
-                  onClick={() => onSelect(contact.uid)}
+                  onSelect={onSelect}
                   subOverride={birthdaySubLabel(contact.birthday!, days)}
                 />
               ))}
@@ -145,7 +145,7 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
               key={r.item.uid}
               contact={r.item}
               selected={r.item.uid === selectedUid}
-              onClick={() => onSelect(r.item.uid)}
+              onSelect={onSelect}
               search={search}
               searchMatches={r.matches}
             />
@@ -172,7 +172,7 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
                     key={c.uid}
                     contact={c}
                     selected={c.uid === selectedUid}
-                    onClick={() => onSelect(c.uid)}
+                    onSelect={onSelect}
                   />
                 ))}
               </div>

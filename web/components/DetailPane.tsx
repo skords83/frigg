@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from 'react';
 import type { Contact } from '@/types/contact';
+import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 import { EditModal } from './EditModal';
 
@@ -59,7 +60,7 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
       <div key={contact.uid} className="detail-enter">
         {/* Header */}
         <div className="flex flex-col items-center text-center mb-9">
-          <Seal initials={initials} size="lg" photoUrl={contact.photo_data_uri} />
+          <Seal initials={initials} size="lg" photoUrl={contactPhotoUrl(contact)} />
           <h1 className="font-fraunces text-[26px] font-medium tracking-tight">{contact.fn}</h1>
           {roleLabel && <p className="text-[13px] text-muted mt-1">{roleLabel}</p>}
           <div className="flex gap-2.5 mt-5">

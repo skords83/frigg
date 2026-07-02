@@ -30,6 +30,7 @@ export interface ContactRow {
   birthday: string | null;
   note: string | null;
   photo_data_uri: string | null;
+  has_photo?: boolean;
   phones: PhoneEntry[];
   emails: EmailEntry[];
   addresses: AddressEntry[];

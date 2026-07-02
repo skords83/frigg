@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react';
 import type { Contact, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
+import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToDisplay, birthdayToIso, normalizePhone } from './form-helpers';
 
@@ -140,7 +141,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
               <Seal
                 initials={getInitials(givenName, familyName)}
                 size="lg"
-                photoUrl={photoPreview === 'remove' ? null : (photoPreview ?? contact.photo_data_uri)}
+                photoUrl={photoPreview === 'remove' ? null : (photoPreview ?? contactPhotoUrl(contact))}
               />
               <span className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -156,7 +157,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
               className="hidden"
               onChange={handleFileChange}
             />
-            {photoPreview !== 'remove' && (photoPreview ?? contact.photo_data_uri) && (
+            {photoPreview !== 'remove' && (photoPreview ?? contactPhotoUrl(contact)) && (
               <button
                 type="button"
                 onClick={() => setPhotoPreview('remove')}

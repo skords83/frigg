@@ -42,7 +42,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     } else if (selected === 'birthdays') {
       result = contacts.filter((c) => c.birthday);
     } else if (selected === 'no-photo') {
-      result = contacts.filter((c) => !c.photo_data_uri);
+      result = contacts.filter((c) => !c.has_photo);
     } else if (typeof selected === 'string' && selected.startsWith('group:')) {
       const groupId = selected.slice(6);
       const group = smartGroups.find((g) => g.id === groupId);
@@ -58,7 +58,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     [contacts]
   );
   const birthdayCount = useMemo(() => contacts.filter((c) => c.birthday).length, [contacts]);
-  const noPhotoCount = useMemo(() => contacts.filter((c) => !c.photo_data_uri).length, [contacts]);
+  const noPhotoCount = useMemo(() => contacts.filter((c) => !c.has_photo).length, [contacts]);
 
   const groupCounts = useMemo(() => {
     const counts: Record<string, number> = {};

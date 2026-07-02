@@ -2,6 +2,7 @@
 
 import React from 'react';
 import type { Contact } from '@/types/contact';
+import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 
 interface SearchMatch {
@@ -12,7 +13,7 @@ interface SearchMatch {
 interface ContactRowProps {
   contact: Contact;
   selected: boolean;
-  onClick: () => void;
+  onSelect: (uid: string) => void;
   subOverride?: string;
   search?: string;
   searchMatches?: ReadonlyArray<SearchMatch>;
@@ -44,12 +45,23 @@ function getSecondarySubtext(matches: ReadonlyArray<SearchMatch>): string | null
   return null;
 }
 
-export function ContactRow({ contact, selected, onClick, subOverride, search, searchMatches }: ContactRowProps) {
+export const ContactRow = React.memo(function ContactRow({
+  contact,
+  selected,
+  onSelect,
+  subOverride,
+  search,
+  searchMatches,
+}: ContactRowProps) {
   const initials = getInitials(contact.given_name, contact.family_name);
   const displayName = contact.fn || `${contact.given_name} ${contact.family_name}`.trim();
   const regularSub = subOverride ?? [contact.org, contact.title].filter(Boolean).join(' · ');
   const secondarySub = searchMatches ? getSecondarySubtext(searchMatches) : null;
   const sub = secondarySub ?? regularSub;
+
+  function handleClick() {
+    onSelect(contact.uid);
+  }
 
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData('text/x-contact-uid', contact.uid);
@@ -60,7 +72,7 @@ export function ContactRow({ contact, selected, onClick, subOverride, search, se
     <button
       draggable
       onDragStart={handleDragStart}
-      onClick={onClick}
+      onClick={handleClick}
       aria-selected={selected}
       className={`w-full text-left flex items-center gap-2.5 px-4 py-2 border-l-2 transition-colors
         ${selected
@@ -68,7 +80,7 @@ export function ContactRow({ contact, selected, onClick, subOverride, search, se
           : 'border-transparent hover:bg-surface'
         }`}
     >
-      <Seal initials={initials} photoUrl={contact.photo_data_uri} />
+      <Seal initials={initials} photoUrl={contactPhotoUrl(contact)} />
       <div className="min-w-0">
         <div className="text-[13.5px] text-foreground truncate">
           {search ? highlightText(displayName, search) : displayName}
@@ -77,4 +89,4 @@ export function ContactRow({ contact, selected, onClick, subOverride, search, se
       </div>
     </button>
   );
-}
+});

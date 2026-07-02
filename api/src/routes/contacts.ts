@@ -10,7 +10,7 @@ router.get('/', async (_req: Request, res: Response) => {
   try {
     const contacts = await query<ContactRow>(
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
        FROM contacts
        ORDER BY family_name, given_name`
     );
@@ -26,12 +26,39 @@ router.get('/:uid', async (req: Request, res: Response) => {
   try {
     const [contact] = await query<ContactRow>(
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
        FROM contacts WHERE uid = $1`,
       [req.params.uid]
     );
     if (!contact) return res.status(404).json({ error: 'not found' });
     res.json(contact);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal' });
+  }
+});
+
+// GET /api/contacts/:uid/photo — serves the photo as a real cacheable image
+// response instead of embedding it as base64 in every contact list payload.
+router.get('/:uid/photo', async (req: Request, res: Response) => {
+  try {
+    const [row] = await query<{ photo_data_uri: string | null; etag: string }>(
+      'SELECT photo_data_uri, etag FROM contacts WHERE uid = $1',
+      [req.params.uid]
+    );
+    if (!row || !row.photo_data_uri) return res.status(404).end();
+
+    const etag = `"photo-${row.etag}"`;
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+
+    const match = /^data:([^;]+);base64,(.+)$/.exec(row.photo_data_uri);
+    if (!match) return res.status(404).end();
+    const [, mimeType, base64] = match;
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('ETag', etag);
+    res.send(Buffer.from(base64, 'base64'));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal' });
@@ -174,7 +201,7 @@ router.put('/:uid', async (req: Request, res: Response) => {
 
     const [updated] = await query<ContactRow>(
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
        FROM contacts WHERE uid = $1`,
       [req.params.uid]
     );
@@ -222,7 +249,7 @@ router.patch('/:uid/photo', async (req: Request, res: Response) => {
 
     const [updated] = await query<ContactRow>(
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
        FROM contacts WHERE uid = $1`,
       [req.params.uid]
     );
@@ -249,7 +276,7 @@ router.patch('/:uid/move', async (req: Request, res: Response) => {
     if (stored.addressbook_id === newBookId) {
       const [current] = await query<ContactRow>(
         `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-                birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+                birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
          FROM contacts WHERE uid = $1`,
         [uid]
       );
@@ -283,7 +310,7 @@ router.patch('/:uid/move', async (req: Request, res: Response) => {
 
     const [updated] = await query<ContactRow>(
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, photo_data_uri, phones, emails, addresses, created_at, updated_at
+              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
        FROM contacts WHERE uid = $1`,
       [uid]
     );
