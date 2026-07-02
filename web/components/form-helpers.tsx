@@ -1,3 +1,5 @@
+import { useState, useRef, type ReactNode } from 'react';
+
 export function birthdayToDisplay(iso: string): string {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return iso;
@@ -21,7 +23,7 @@ export function normalizePhone(v: string): string {
 export const inputCls =
   'bg-transparent border border-divider rounded-md px-2.5 py-1.5 text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:border-accent-dim transition-colors';
 
-export function FormSection({ label, children }: { label: string; children: React.ReactNode }) {
+export function FormSection({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       <h3 className="font-mono text-[10px] tracking-widest uppercase text-accent-dim mb-2.5 pb-1.5 border-b border-divider-soft">
@@ -44,16 +46,54 @@ export function FormField({ label, value, onChange }: { label: string; value: st
 }
 
 export function LabelSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
-  const allOptions = options.includes(value) ? options : [value, ...options];
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const isCustom = !options.includes(value);
+  const allOptions = isCustom ? [value, ...options] : options;
+
+  function confirmEdit() {
+    const v = draft.trim();
+    if (v) onChange(v);
+    setIsEditing(false);
+  }
+
+  if (isEditing) {
+    return (
+      <input
+        ref={inputRef}
+        autoFocus
+        className="bg-transparent border border-accent-dim rounded-md px-2 py-1.5 text-[11px] font-mono text-foreground focus:outline-none w-[90px] shrink-0"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={confirmEdit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); confirmEdit(); }
+          if (e.key === 'Escape') { setIsEditing(false); }
+        }}
+        placeholder="Label …"
+      />
+    );
+  }
+
   return (
     <select
       className="bg-transparent border border-divider rounded-md px-2 py-1.5 text-[11px] font-mono text-muted focus:outline-none focus:border-accent-dim transition-colors w-[90px] shrink-0"
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => {
+        if (e.target.value === '__custom__') {
+          setDraft(isCustom ? value : '');
+          setIsEditing(true);
+        } else {
+          onChange(e.target.value);
+        }
+      }}
     >
       {allOptions.map((o) => (
         <option key={o} value={o}>{o}</option>
       ))}
+      <option value="__custom__">Eigenes …</option>
     </select>
   );
 }
