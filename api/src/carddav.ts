@@ -72,7 +72,12 @@ export function parseVCard(raw: string): ParsedCard | null {
     const org = getStr('org')?.split(';')[0] ?? null;
     const title = getStr('title') ?? null;
     const note = getStr('note') ?? null;
-    const birthday = getStr('bday') ?? null;
+
+    // Normalize birthday to YYYY-MM-DD: Apple Contacts uses YYYYMMDD (no dashes)
+    let birthday = getStr('bday') ?? null;
+    if (birthday && /^\d{8}$/.test(birthday)) {
+      birthday = `${birthday.slice(0, 4)}-${birthday.slice(4, 6)}-${birthday.slice(6, 8)}`;
+    }
 
     // Photo — data URI format (PHOTO:data:image/...) or traditional ENCODING=B
     let photo_data_uri: string | null = null;
@@ -122,14 +127,20 @@ export function parseVCard(raw: string): ParsedCard | null {
       const arr = Array.isArray(adrProps) ? adrProps : [adrProps];
       for (const p of arr) {
         // ADR: PO Box;extended;street;city;state;zip;country
-        const parts = p.valueOf().split(';');
+        // Split on unescaped semicolons only (vCard uses \; for literal semicolons)
+        const adrValue = p.valueOf() as string;
+        const parts = adrValue.split(/(?<!\\);/).map((s) => unescapeAdrComponent(s.trim()));
+        const street = parts[2] ?? '';
+        const city = parts[3] ?? '';
+        // Skip entries where both street and city are empty (invalid/placeholder ADR)
+        if (!street && !city) continue;
         addresses.push({
           label: normalizeTypeLabel(getTypeParam(p)),
-          street: parts[2]?.trim() ?? '',
-          city: parts[3]?.trim() ?? '',
-          state: parts[4]?.trim() || undefined,
-          zip: parts[5]?.trim() ?? '',
-          country: parts[6]?.trim() || undefined,
+          street,
+          city,
+          state: parts[4] || undefined,
+          zip: parts[5] ?? '',
+          country: parts[6] || undefined,
         });
       }
     }
@@ -142,6 +153,14 @@ export function parseVCard(raw: string): ParsedCard | null {
     console.error('vCard parse error', err);
     return null;
   }
+}
+
+function unescapeAdrComponent(s: string): string {
+  return s
+    .replace(/\\n/gi, ' ')
+    .replace(/\\,/g, ',')
+    .replace(/\\;/g, ';')
+    .replace(/\\\\/g, '\\');
 }
 
 function normalizeTypeLabel(type: string): string {

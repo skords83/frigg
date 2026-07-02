@@ -4,9 +4,11 @@ import { runSync } from '../sync';
 const router = Router();
 
 // POST /api/sync — trigger manual sync
-router.post('/', async (_req: Request, res: Response) => {
+// POST /api/sync?force=true — force full re-parse of all contacts (fixes stale parsed fields)
+router.post('/', async (req: Request, res: Response) => {
   try {
-    const result = await runSync();
+    const force = req.query['force'] === 'true';
+    const result = await runSync(force);
     res.json(result);
   } catch (err) {
     console.error(err);

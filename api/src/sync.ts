@@ -13,9 +13,14 @@ async function upsertContact(
   href: string,
   etag: string,
   data: string,
+  force = false,
 ): Promise<boolean> {
   const parsed = parseVCard(data);
   if (!parsed) return false;
+
+  const whereClause = force
+    ? ''
+    : 'WHERE contacts.etag IS DISTINCT FROM EXCLUDED.etag OR contacts.href IS DISTINCT FROM EXCLUDED.href';
 
   await pool.query(
     `INSERT INTO contacts
@@ -39,8 +44,7 @@ async function upsertContact(
        addresses       = EXCLUDED.addresses,
        raw_vcard       = EXCLUDED.raw_vcard,
        updated_at      = now()
-     WHERE contacts.etag IS DISTINCT FROM EXCLUDED.etag
-        OR contacts.href IS DISTINCT FROM EXCLUDED.href`,
+     ${whereClause}`,
     [
       parsed.uid,
       bookId,
@@ -68,8 +72,9 @@ async function fullSync(
   book: DAVBook,
   bookId: string,
   displayName: string,
+  force = false,
 ): Promise<{ synced: number; errors: number; syncToken: string | null }> {
-  console.log(`[sync] ${displayName}: full sync …`);
+  console.log(`[sync] ${displayName}: full sync${force ? ' (forced re-parse)' : ''} …`);
   let synced = 0;
   let errors = 0;
 
@@ -78,7 +83,7 @@ async function fullSync(
 
   for (const card of vCards) {
     const href = card.url ?? '';
-    const ok = await upsertContact(bookId, href, card.etag ?? '', card.data ?? '');
+    const ok = await upsertContact(bookId, href, card.etag ?? '', card.data ?? '', force);
     if (ok) { serverHrefs.add(href); synced++; }
     else errors++;
   }
@@ -171,8 +176,8 @@ async function deltaSync(
   return { synced, errors, syncToken: newSyncToken };
 }
 
-export async function runSync(): Promise<{ synced: number; errors: number }> {
-  console.log('[sync] Starting sync …');
+export async function runSync(force = false): Promise<{ synced: number; errors: number }> {
+  console.log(`[sync] Starting sync${force ? ' (forced re-parse of all contacts)' : ''} …`);
   let synced = 0;
   let errors = 0;
 
@@ -202,7 +207,7 @@ export async function runSync(): Promise<{ synced: number; errors: number }> {
         [bookId, displayName, book.url, newCtag]
       );
 
-      const needsSync = !stored?.ctag || stored.ctag !== newCtag;
+      const needsSync = force || !stored?.ctag || stored.ctag !== newCtag;
       if (!needsSync) {
         console.log(`[sync] ${displayName}: ctag unchanged, skipping`);
         continue;
@@ -216,7 +221,7 @@ export async function runSync(): Promise<{ synced: number; errors: number }> {
       );
       const hasLocalContacts = parseInt(count, 10) > 0;
 
-      if (stored?.sync_token && hasLocalContacts) {
+      if (!force && stored?.sync_token && hasLocalContacts) {
         try {
           result = await deltaSync(client, book, bookId, displayName, stored.sync_token);
         } catch (err) {
@@ -225,7 +230,7 @@ export async function runSync(): Promise<{ synced: number; errors: number }> {
           result = await fullSync(client, book, bookId, displayName);
         }
       } else {
-        result = await fullSync(client, book, bookId, displayName);
+        result = await fullSync(client, book, bookId, displayName, force);
       }
 
       synced += result.synced;
