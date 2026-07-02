@@ -25,8 +25,8 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
   const [error, setError] = useState<string | null>(null);
 
   async function handleSave() {
-    if (!givenName.trim() && !familyName.trim()) {
-      setError('Bitte mindestens Vor- oder Nachname angeben.');
+    if (!givenName.trim() && !familyName.trim() && !org.trim()) {
+      setError('Bitte mindestens Vor- oder Nachname oder Firma angeben.');
       return;
     }
     setSaving(true);
