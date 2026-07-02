@@ -43,7 +43,7 @@ Scale runs small and dense by design (`10px`–`16px` for nearly all UI text) �
 
 - **Radii**: `rounded-full` for all buttons and pills (the signature shape — action buttons, tags, the mono-label pills). `rounded-md` for inputs and standard containers. `rounded-lg`/`rounded-xl` for modal panels and larger surfaces. `rounded-[3px]` appears once for a specific tight-corner case — don't generalize it.
 - **Borders**: 1px `border-divider` is the default container/input border; `border-divider-soft` for quieter internal rules (e.g. under `FormSection` labels). Focus state swaps to `border-accent-dim`, never a color outside the palette.
-- **Selection state**: list rows use an **inset** box-shadow (`shadow-[inset ...]`) with the accent color to mark the selected row, not a real `border-left` — this avoids layout shift and reads as a subtle frame rather than a decorative stripe. Reuse this technique for any new selectable-row pattern; do not add a literal colored `border-left`/`border-right`.
+- **Selection state**: two established techniques, by context. Sidebar nav items (`Sidebar.tsx`) use an **inset** box-shadow (`shadow-[inset_2px_0_0_var(--accent)]`) to avoid layout shift. `ContactRow` uses a literal 2px `border-l-2` (`border-accent` when selected, `border-transparent` otherwise) — this is a deliberate exception to the side-stripe ban: it's the single-selection indicator on an interactive, one-row-active-at-a-time list (the macOS Contacts/Mail convention), not decorative accent on a card or callout. Don't extend the literal-border approach to cards, list items with multi-select, or anything that isn't a single current-selection indicator — reach for the inset-shadow technique there instead.
 - **Seal motif**: avatars (`Seal.tsx`) use a diagonal gradient (`linear-gradient(155deg, #2c342a, #1e241c)`) with a `::before` ring at low-alpha brass-gold and, at large size, an outer `::after` ring in `divider-soft`. This is the one place literal decorative rings belong — don't repeat the motif outside avatars.
 - **Shadows**: modals use `shadow-2xl`/`shadow-lg` for panel elevation; everything else stays flat. Don't add shadow to routine cards/rows — elevation is reserved for things that float above the page (modals, popovers).
 
@@ -66,7 +66,7 @@ Scale runs small and dense by design (`10px`–`16px` for nearly all UI text) �
 ## Don't
 
 - Don't add a second saturated accent color — brass-gold is the only one.
-- Don't use a literal `border-left`/`border-right` for selection or emphasis — use the inset-shadow technique already established, or a background tint.
+- Don't add a literal `border-left`/`border-right` for emphasis outside the one established exception (`ContactRow`'s single-selection indicator, see Shape & Elevation) — use the inset-shadow technique, or a background tint, everywhere else.
 - Don't inflate the type scale — this is a dense utility tool; new text should fit the existing `10–16px` range.
 - Don't add drop shadows to routine rows/cards — reserve elevation for modals and popovers.
 - Don't introduce a fourth font family or use Fraunces for body copy / Plex Sans for names — the three-family role split is load-bearing.
