@@ -210,7 +210,13 @@ export async function runSync(): Promise<{ synced: number; errors: number }> {
 
       let result: { synced: number; errors: number; syncToken: string | null };
 
-      if (stored?.sync_token) {
+      const [{ count }] = await query<{ count: string }>(
+        'SELECT COUNT(*)::text AS count FROM contacts WHERE addressbook_id = $1',
+        [bookId]
+      );
+      const hasLocalContacts = parseInt(count, 10) > 0;
+
+      if (stored?.sync_token && hasLocalContacts) {
         try {
           result = await deltaSync(client, book, bookId, displayName, stored.sync_token);
         } catch (err) {
