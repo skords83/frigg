@@ -364,11 +364,4 @@ function buildVCard(fields: {
   return lines.join('\r\n');
 }
 
-function labelToVCardType(label: string): string {
-  const map: Record<string, string> = {
-    mobil: 'cell', mobile: 'cell', arbeit: 'work', privat: 'home', zuhause: 'home',
-  };
-  return map[label.toLowerCase()] ?? label;
-}
-
 export default router;
