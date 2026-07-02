@@ -14,3 +14,7 @@ export async function syncContacts(): Promise<{ ok: boolean }> {
     return { ok: false };
   }
 }
+
+export async function invalidateContacts(): Promise<void> {
+  revalidatePath('/');
+}

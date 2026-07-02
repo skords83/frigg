@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Contact, AddressBook, SmartCollection, SmartGroup } from '@/types/contact';
-import { syncContacts } from '@/app/actions';
+import { syncContacts, invalidateContacts } from '@/app/actions';
 import { Sidebar } from './Sidebar';
 import { ContactList } from './ContactList';
 import { DetailPane } from './DetailPane';
@@ -83,6 +83,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     setContacts((prev) => [...prev, contact]);
     setSelectedUid(contact.uid);
     setShowNewContact(false);
+    invalidateContacts().then(() => router.refresh());
   }
 
   async function moveContact(uid: string, targetBookId: string) {
