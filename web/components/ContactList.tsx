@@ -154,7 +154,7 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
       ) : (
         /* Normal grouped view + index rail */
         <div className="flex flex-1 overflow-hidden">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          <div ref={scrollRef} className="relative flex-1 overflow-y-auto">
             {(grouped ?? []).length === 0 && (
               <p className="text-muted text-[13px] px-4 py-8 text-center">Keine Kontakte gefunden</p>
             )}
