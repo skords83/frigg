@@ -1,24 +1,68 @@
 import { createDAVClient } from 'tsdav';
 import VCF from 'vcf';
 import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
+import { query } from './db';
+import { decryptSecret } from './crypto';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DAVClientInstance = any;
 
-let _client: DAVClientInstance = null;
+interface CardDavAccountRow {
+  id: string;
+  carddav_url: string;
+  username: string;
+  password_encrypted: string;
+  password_iv: string;
+  password_auth_tag: string;
+}
 
-export async function getClient(): Promise<DAVClientInstance> {
-  if (_client) return _client;
-  _client = await createDAVClient({
-    serverUrl: process.env.CARDDAV_URL!,
-    credentials: {
-      username: process.env.CARDDAV_USERNAME!,
-      password: process.env.CARDDAV_PASSWORD!,
-    },
+// One DAVClient per carddav_accounts row, cached for the process lifetime.
+// invalidateAccountClient() must be called whenever a row's credentials change.
+const clientCache = new Map<string, DAVClientInstance>();
+
+async function buildClient(account: CardDavAccountRow): Promise<DAVClientInstance> {
+  const password = decryptSecret({
+    ciphertext: account.password_encrypted,
+    iv: account.password_iv,
+    authTag: account.password_auth_tag,
+  });
+  return createDAVClient({
+    serverUrl: account.carddav_url,
+    credentials: { username: account.username, password },
     authMethod: 'Basic',
     defaultAccountType: 'carddav',
   });
-  return _client;
+}
+
+export async function getClientForAccount(accountId: string): Promise<DAVClientInstance> {
+  const cached = clientCache.get(accountId);
+  if (cached) return cached;
+
+  const [account] = await query<CardDavAccountRow>(
+    `SELECT id, carddav_url, username, password_encrypted, password_iv, password_auth_tag
+     FROM carddav_accounts WHERE id = $1`,
+    [accountId]
+  );
+  if (!account) throw new Error(`carddav_accounts row ${accountId} not found`);
+
+  const client = await buildClient(account);
+  clientCache.set(accountId, client);
+  return client;
+}
+
+export async function getClientForAddressbook(addressbookId: string): Promise<DAVClientInstance> {
+  const [row] = await query<{ carddav_account_id: string | null }>(
+    `SELECT carddav_account_id FROM addressbooks WHERE id = $1`,
+    [addressbookId]
+  );
+  if (!row?.carddav_account_id) {
+    throw new Error(`addressbook ${addressbookId} has no linked CardDAV account`);
+  }
+  return getClientForAccount(row.carddav_account_id);
+}
+
+export function invalidateAccountClient(accountId: string): void {
+  clientCache.delete(accountId);
 }
 
 export interface ParsedCard {

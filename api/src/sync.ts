@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { getClient, parseVCard } from './carddav';
+import { getClientForAccount, parseVCard } from './carddav';
 import { query, pool } from './db';
 import type { AddressBookRow } from './types';
 
@@ -181,70 +181,81 @@ export async function runSync(force = false): Promise<{ synced: number; errors: 
   let synced = 0;
   let errors = 0;
 
-  try {
-    const client = await getClient();
-    const books = await client.fetchAddressBooks();
+  const accounts = await query<{ id: string }>('SELECT id FROM carddav_accounts');
+  if (accounts.length === 0) {
+    console.warn('[sync] no carddav_accounts configured — nothing to sync');
+    return { synced, errors };
+  }
 
-    for (const book of books) {
-      const bookId = book.url;
-      const displayName = (book.displayName as string | undefined) ?? book.url;
-      const newCtag = (book as Record<string, unknown>).ctag as string | undefined ?? null;
+  for (const account of accounts) {
+    try {
+      const client = await getClientForAccount(account.id);
+      const books = await client.fetchAddressBooks();
 
-      // Read stored state BEFORE upserting so we can compare old vs new ctag
-      const [stored] = await query<AddressBookRow>(
-        'SELECT ctag, sync_token FROM addressbooks WHERE id = $1',
-        [bookId]
-      );
+      for (const book of books) {
+        const bookId = book.url;
+        const displayName = (book.displayName as string | undefined) ?? book.url;
+        const newCtag = (book as Record<string, unknown>).ctag as string | undefined ?? null;
 
-      // Upsert addressbook metadata (sync_token is managed separately below)
-      await pool.query(
-        `INSERT INTO addressbooks (id, display_name, url, ctag, updated_at)
-         VALUES ($1, $2, $3, $4, now())
-         ON CONFLICT (id) DO UPDATE
-           SET display_name = EXCLUDED.display_name,
-               ctag         = EXCLUDED.ctag,
-               updated_at   = now()`,
-        [bookId, displayName, book.url, newCtag]
-      );
+        // Read stored state BEFORE upserting so we can compare old vs new ctag
+        const [stored] = await query<AddressBookRow>(
+          'SELECT ctag, sync_token FROM addressbooks WHERE id = $1',
+          [bookId]
+        );
 
-      const needsSync = force || !stored?.ctag || stored.ctag !== newCtag;
-      if (!needsSync) {
-        console.log(`[sync] ${displayName}: ctag unchanged, skipping`);
-        continue;
-      }
+        // Upsert addressbook metadata (sync_token is managed separately below)
+        await pool.query(
+          `INSERT INTO addressbooks (id, display_name, url, ctag, carddav_account_id, updated_at)
+           VALUES ($1, $2, $3, $4, $5, now())
+           ON CONFLICT (id) DO UPDATE
+             SET display_name = EXCLUDED.display_name,
+                 ctag         = EXCLUDED.ctag,
+                 carddav_account_id = EXCLUDED.carddav_account_id,
+                 updated_at   = now()`,
+          [bookId, displayName, book.url, newCtag, account.id]
+        );
 
-      let result: { synced: number; errors: number; syncToken: string | null };
-
-      const [{ count }] = await query<{ count: string }>(
-        'SELECT COUNT(*)::text AS count FROM contacts WHERE addressbook_id = $1',
-        [bookId]
-      );
-      const hasLocalContacts = parseInt(count, 10) > 0;
-
-      if (!force && stored?.sync_token && hasLocalContacts) {
-        try {
-          result = await deltaSync(client, book, bookId, displayName, stored.sync_token);
-        } catch (err) {
-          // Server rejected the sync-token (expired / invalid) → fall back to full sync
-          console.warn(`[sync] ${displayName}: delta sync failed (${(err as Error).message}), falling back to full sync`);
-          result = await fullSync(client, book, bookId, displayName);
+        const needsSync = force || !stored?.ctag || stored.ctag !== newCtag;
+        if (!needsSync) {
+          console.log(`[sync] ${displayName}: ctag unchanged, skipping`);
+          continue;
         }
-      } else {
-        result = await fullSync(client, book, bookId, displayName, force);
+
+        let result: { synced: number; errors: number; syncToken: string | null };
+
+        const [{ count }] = await query<{ count: string }>(
+          'SELECT COUNT(*)::text AS count FROM contacts WHERE addressbook_id = $1',
+          [bookId]
+        );
+        const hasLocalContacts = parseInt(count, 10) > 0;
+
+        if (!force && stored?.sync_token && hasLocalContacts) {
+          try {
+            result = await deltaSync(client, book, bookId, displayName, stored.sync_token);
+          } catch (err) {
+            // Server rejected the sync-token (expired / invalid) → fall back to full sync
+            console.warn(`[sync] ${displayName}: delta sync failed (${(err as Error).message}), falling back to full sync`);
+            result = await fullSync(client, book, bookId, displayName);
+          }
+        } else {
+          result = await fullSync(client, book, bookId, displayName, force);
+        }
+
+        synced += result.synced;
+        errors += result.errors;
+
+        // Persist the new sync-token from the server
+        await pool.query(
+          'UPDATE addressbooks SET sync_token = $1, updated_at = now() WHERE id = $2',
+          [result.syncToken, bookId]
+        );
       }
-
-      synced += result.synced;
-      errors += result.errors;
-
-      // Persist the new sync-token from the server
-      await pool.query(
-        'UPDATE addressbooks SET sync_token = $1, updated_at = now() WHERE id = $2',
-        [result.syncToken, bookId]
-      );
+    } catch (err) {
+      // One account's failure (e.g. wrong/expired Baïkal password) shouldn't stop
+      // the others from syncing.
+      console.error(`[sync] Fatal error for carddav_account ${account.id}`, err);
+      errors++;
     }
-  } catch (err) {
-    console.error('[sync] Fatal error', err);
-    errors++;
   }
 
   console.log(`[sync] Done — synced: ${synced}, errors: ${errors}`);

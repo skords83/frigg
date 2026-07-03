@@ -1,11 +1,14 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { query } from '../db';
+import { getVisibleAddressbookIds } from '../auth/access';
+import type { AuthedRequest } from '../auth/middleware';
 
 const router = Router();
 
 // GET /api/addressbooks
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', async (req: AuthedRequest, res: Response) => {
   try {
+    const visibleIds = await getVisibleAddressbookIds(req.user!.id);
     const books = await query<{
       id: string;
       display_name: string;
@@ -16,8 +19,10 @@ router.get('/', async (_req: Request, res: Response) => {
               COUNT(c.uid)::int AS contact_count
        FROM addressbooks ab
        LEFT JOIN contacts c ON c.addressbook_id = ab.id
+       WHERE ab.id = ANY($1::text[])
        GROUP BY ab.id
-       ORDER BY ab.display_name`
+       ORDER BY ab.display_name`,
+      [visibleIds]
     );
     res.json(books);
   } catch (err) {

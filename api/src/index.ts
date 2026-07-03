@@ -34,11 +34,9 @@ async function main() {
   await runBootstrap();
   app.listen(PORT, () => {
     console.log(`frigg-api listening on :${PORT}`);
-    if (process.env.CARDDAV_URL) {
-      startSyncSchedule();
-    } else {
-      console.warn('[sync] CARDDAV_URL not set — sync disabled');
-    }
+    // CardDAV accounts now live in the carddav_accounts table, not env vars —
+    // runSync() itself no-ops gracefully when there are zero accounts.
+    startSyncSchedule();
   });
 }
 

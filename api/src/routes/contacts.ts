@@ -1,18 +1,23 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { query, pool } from '../db';
-import { getClient, parseVCard, patchVCard, patchPhotoInVCard, escapeVCardValue, escapeVCardComponent, labelToVCardType } from '../carddav';
+import { getClientForAddressbook, parseVCard, patchVCard, patchPhotoInVCard, escapeVCardValue, escapeVCardComponent, labelToVCardType } from '../carddav';
+import { getVisibleAddressbookIds, canAccessAddressbook } from '../auth/access';
+import type { AuthedRequest } from '../auth/middleware';
 import type { ContactRow } from '../types';
 
 const router = Router();
 
 // GET /api/contacts
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', async (req: AuthedRequest, res: Response) => {
   try {
+    const visibleIds = await getVisibleAddressbookIds(req.user!.id);
     const contacts = await query<ContactRow>(
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
               birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
        FROM contacts
-       ORDER BY family_name, given_name`
+       WHERE addressbook_id = ANY($1::text[])
+       ORDER BY family_name, given_name`,
+      [visibleIds]
     );
     res.json(contacts);
   } catch (err) {
@@ -22,7 +27,7 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 // GET /api/contacts/:uid
-router.get('/:uid', async (req: Request, res: Response) => {
+router.get('/:uid', async (req: AuthedRequest, res: Response) => {
   try {
     const [contact] = await query<ContactRow>(
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
@@ -31,6 +36,9 @@ router.get('/:uid', async (req: Request, res: Response) => {
       [req.params.uid]
     );
     if (!contact) return res.status(404).json({ error: 'not found' });
+    if (!(await canAccessAddressbook(req.user!.id, contact.addressbook_id))) {
+      return res.status(404).json({ error: 'not found' });
+    }
     res.json(contact);
   } catch (err) {
     console.error(err);
@@ -40,13 +48,14 @@ router.get('/:uid', async (req: Request, res: Response) => {
 
 // GET /api/contacts/:uid/photo — serves the photo as a real cacheable image
 // response instead of embedding it as base64 in every contact list payload.
-router.get('/:uid/photo', async (req: Request, res: Response) => {
+router.get('/:uid/photo', async (req: AuthedRequest, res: Response) => {
   try {
-    const [row] = await query<{ photo_data_uri: string | null; etag: string }>(
-      'SELECT photo_data_uri, etag FROM contacts WHERE uid = $1',
+    const [row] = await query<{ photo_data_uri: string | null; etag: string; addressbook_id: string }>(
+      'SELECT photo_data_uri, etag, addressbook_id FROM contacts WHERE uid = $1',
       [req.params.uid]
     );
     if (!row || !row.photo_data_uri) return res.status(404).end();
+    if (!(await canAccessAddressbook(req.user!.id, row.addressbook_id))) return res.status(404).end();
 
     const etag = `"photo-${row.etag}"`;
     if (req.headers['if-none-match'] === etag) return res.status(304).end();
@@ -66,16 +75,20 @@ router.get('/:uid/photo', async (req: Request, res: Response) => {
 });
 
 // POST /api/contacts — create new contact
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req: AuthedRequest, res: Response) => {
   try {
     const { addressbook_id, fn, given_name, family_name, org, title, birthday, note, phones, emails, addresses } = req.body;
+
+    if (!(await canAccessAddressbook(req.user!.id, addressbook_id))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     const uid = crypto.randomUUID();
     const rawVcard = buildVCard({ uid, fn, given_name, family_name, org, title, birthday, note, phones, emails, addresses });
 
-    const client = await getClient();
     const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [addressbook_id]);
     if (!book) return res.status(400).json({ error: 'address book not found' });
+    const client = await getClientForAddressbook(addressbook_id);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result: any = await client.createVCard({
@@ -109,13 +122,16 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // PUT /api/contacts/:uid — update existing contact
-router.put('/:uid', async (req: Request, res: Response) => {
+router.put('/:uid', async (req: AuthedRequest, res: Response) => {
   try {
     const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string }>(
       'SELECT etag, raw_vcard, addressbook_id FROM contacts WHERE uid = $1',
       [req.params.uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
+    if (!(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     // ETag conflict check
     const clientEtag = req.headers['if-match'];
@@ -161,9 +177,9 @@ router.put('/:uid', async (req: Request, res: Response) => {
 
     const newRawVcard = patchVCard(stored.raw_vcard, patchFields, multiFields);
 
-    const client = await getClient();
     const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
     if (!book) return res.status(500).json({ error: 'address book not found' });
+    const client = await getClientForAddressbook(stored.addressbook_id);
 
     const vcardUrl = `${book.url}${req.params.uid}.vcf`;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -213,13 +229,16 @@ router.put('/:uid', async (req: Request, res: Response) => {
 });
 
 // PATCH /api/contacts/:uid/photo
-router.patch('/:uid/photo', async (req: Request, res: Response) => {
+router.patch('/:uid/photo', async (req: AuthedRequest, res: Response) => {
   try {
     const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string }>(
       'SELECT etag, raw_vcard, addressbook_id FROM contacts WHERE uid = $1',
       [req.params.uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
+    if (!(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     const { photo_data_uri } = req.body as { photo_data_uri?: string | null };
     const removing = photo_data_uri === null || photo_data_uri === '';
@@ -231,9 +250,9 @@ router.patch('/:uid/photo', async (req: Request, res: Response) => {
       ? stored.raw_vcard.replace(/^PHOTO[;:][^\r\n]*(?:\r?\n[ \t][^\r\n]*)*/gim, '').replace(/(\r?\n){3,}/g, '\r\n')
       : patchPhotoInVCard(stored.raw_vcard, photo_data_uri!);
 
-    const client = await getClient();
     const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
     if (!book) return res.status(500).json({ error: 'address book not found' });
+    const client = await getClientForAddressbook(stored.addressbook_id);
 
     const vcardUrl = `${book.url}${req.params.uid}.vcf`;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -261,7 +280,7 @@ router.patch('/:uid/photo', async (req: Request, res: Response) => {
 });
 
 // PATCH /api/contacts/:uid/move — move to a different address book
-router.patch('/:uid/move', async (req: Request, res: Response) => {
+router.patch('/:uid/move', async (req: AuthedRequest, res: Response) => {
   try {
     const { uid } = req.params;
     const { addressbook_id: newBookId } = req.body as { addressbook_id?: string };
@@ -272,6 +291,13 @@ router.patch('/:uid/move', async (req: Request, res: Response) => {
       [uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
+
+    if (
+      !(await canAccessAddressbook(req.user!.id, stored.addressbook_id)) ||
+      !(await canAccessAddressbook(req.user!.id, newBookId))
+    ) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     if (stored.addressbook_id === newBookId) {
       const [current] = await query<ContactRow>(
@@ -289,14 +315,17 @@ router.patch('/:uid/move', async (req: Request, res: Response) => {
     ]);
     if (!newBook) return res.status(404).json({ error: 'target address book not found' });
 
-    const client = await getClient();
-
+    // Source and destination books may belong to different CardDAV accounts
+    // (e.g. moving a contact into a book shared by another Frigg user), so
+    // each needs its own client resolved independently.
     if (oldBook) {
-      await client.deleteVCard({ vCard: { url: `${oldBook.url}${uid}.vcf`, etag: stored.etag } as never });
+      const oldClient = await getClientForAddressbook(stored.addressbook_id);
+      await oldClient.deleteVCard({ vCard: { url: `${oldBook.url}${uid}.vcf`, etag: stored.etag } as never });
     }
 
+    const newClient = await getClientForAddressbook(newBookId);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const createResult: any = await client.createVCard({
+    const createResult: any = await newClient.createVCard({
       addressBook: { url: newBook.url },
       filename: `${uid}.vcf`,
       vCardString: stored.raw_vcard,
@@ -322,21 +351,24 @@ router.patch('/:uid/move', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/contacts/:uid
-router.delete('/:uid', async (req: Request, res: Response) => {
+router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
   try {
     const [stored] = await query<{ etag: string; addressbook_id: string }>(
       'SELECT etag, addressbook_id FROM contacts WHERE uid = $1',
       [req.params.uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
+    if (!(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     const clientEtag = req.headers['if-match'];
     if (clientEtag && clientEtag !== stored.etag) {
       return res.status(409).json({ error: 'conflict', serverEtag: stored.etag });
     }
 
-    const client = await getClient();
     const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
+    const client = await getClientForAddressbook(stored.addressbook_id);
     if (book) {
       const vcardUrl = `${book.url}${req.params.uid}.vcf`;
       await client.deleteVCard({ vCard: { url: vcardUrl, etag: stored.etag } as never });
