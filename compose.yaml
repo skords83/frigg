@@ -26,6 +26,9 @@ services:
       CARDDAV_PASSWORD: ${CARDDAV_PASSWORD}
       WEB_ORIGIN: https://contacts.skords.de
       PORT: "3001"
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD}
+      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY}
     depends_on:
       db:
         condition: service_healthy

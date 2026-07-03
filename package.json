@@ -9,10 +9,11 @@
     "dev:web": "npm run dev --workspace=web",
     "dev:api": "npm run dev --workspace=api",
     "build": "npm run build --workspace=api && npm run build --workspace=web",
-    "migrate": "psql \"$DATABASE_URL\" -f api/migrations/001_init.sql"
+    "migrate": "psql \"$DATABASE_URL\" -f"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
-    "sharp@0.34.5": true
+    "sharp@0.34.5": true,
+    "argon2@0.41.1": true
   }
 }

@@ -5,6 +5,7 @@ import contactsRouter from './routes/contacts';
 import addressbooksRouter from './routes/addressbooks';
 import syncRouter from './routes/sync';
 import { startSyncSchedule } from './sync';
+import { runBootstrap } from './bootstrap';
 
 const app = express();
 
@@ -18,11 +19,20 @@ app.use('/api/sync', syncRouter);
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 const PORT = Number(process.env.PORT ?? 3001);
-app.listen(PORT, () => {
-  console.log(`frigg-api listening on :${PORT}`);
-  if (process.env.CARDDAV_URL) {
-    startSyncSchedule();
-  } else {
-    console.warn('[sync] CARDDAV_URL not set — sync disabled');
-  }
+
+async function main() {
+  await runBootstrap();
+  app.listen(PORT, () => {
+    console.log(`frigg-api listening on :${PORT}`);
+    if (process.env.CARDDAV_URL) {
+      startSyncSchedule();
+    } else {
+      console.warn('[sync] CARDDAV_URL not set — sync disabled');
+    }
+  });
+}
+
+main().catch((err) => {
+  console.error('[bootstrap] fatal error during startup', err);
+  process.exit(1);
 });
