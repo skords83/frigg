@@ -25,3 +25,15 @@ export async function canAccessAddressbook(userId: string, addressbookId: string
   );
   return rows.length > 0;
 }
+
+// Ownership (via carddav_accounts.user_id) is distinct from access: only the
+// owner may grant/revoke sharing on an addressbook.
+export async function isAddressbookOwner(userId: string, addressbookId: string): Promise<boolean> {
+  const rows = await query(
+    `SELECT 1 FROM addressbooks ab
+     JOIN carddav_accounts ca ON ca.id = ab.carddav_account_id
+     WHERE ab.id = $1 AND ca.user_id = $2`,
+    [addressbookId, userId]
+  );
+  return rows.length > 0;
+}

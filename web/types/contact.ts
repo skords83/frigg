@@ -45,6 +45,7 @@ export interface AddressBook {
   display_name: string;
   url: string;
   contact_count: number;
+  is_owner: boolean;
 }
 
 export type SmartCollection = 'all' | 'recent' | 'birthdays' | 'no-photo';

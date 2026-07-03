@@ -1,4 +1,4 @@
-import { useState, useRef, type ReactNode } from 'react';
+import { forwardRef, useState, useRef, type ReactNode } from 'react';
 
 /** Shared enter/exit timing for the four modals — waits out the CSS exit animation before unmounting. */
 export function useModalClose(onClose: () => void, duration = 130) {
@@ -35,6 +35,34 @@ export function normalizePhone(v: string): string {
   if (s.startsWith('0')) return '+49' + s.slice(1);
   return s;
 }
+
+export const ActionButton = forwardRef<
+  HTMLButtonElement,
+  {
+    label: string;
+    onClick?: () => void;
+    variant?: 'primary' | 'danger' | 'default';
+    type?: 'button' | 'submit';
+    disabled?: boolean;
+  }
+>(function ActionButton({ label, onClick, variant = 'default', type = 'button', disabled = false }, ref) {
+  const styles: Record<string, string> = {
+    primary: 'border-accent-dim text-accent bg-[rgba(201,164,76,0.08)] hover:bg-[rgba(201,164,76,0.15)] hover:border-accent',
+    danger: 'border-divider text-muted hover:border-red-500/50 hover:text-red-400',
+    default: 'border-divider text-muted hover:border-accent-dim hover:text-accent',
+  };
+  return (
+    <button
+      ref={ref}
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={`press font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full border transition-colors disabled:opacity-50 ${styles[variant]}`}
+    >
+      {label}
+    </button>
+  );
+});
 
 export const inputCls =
   'bg-transparent border border-divider rounded-md px-2.5 py-1.5 text-[13px] text-foreground placeholder:text-muted focus:outline-none focus:border-accent-dim transition-colors';

@@ -5,6 +5,7 @@ import type { Contact } from '@/types/contact';
 import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 import { EditModal } from './EditModal';
+import { ActionButton } from './form-helpers';
 
 interface DetailPaneProps {
   contact: Contact | null;
@@ -174,24 +175,6 @@ function FieldRow({ tag, children }: { tag: string; children: React.ReactNode })
   );
 }
 
-const ActionButton = React.forwardRef<HTMLButtonElement, { label: string; onClick: () => void; variant?: 'primary' | 'danger' | 'default' }>(
-  function ActionButton({ label, onClick, variant = 'default' }, ref) {
-    const styles: Record<string, string> = {
-      primary: 'border-accent-dim text-accent bg-[rgba(201,164,76,0.08)] hover:bg-[rgba(201,164,76,0.15)] hover:border-accent',
-      danger: 'border-divider text-muted hover:border-red-500/50 hover:text-red-400',
-      default: 'border-divider text-muted hover:border-accent-dim hover:text-accent',
-    };
-    return (
-      <button
-        ref={ref}
-        onClick={onClick}
-        className={`press font-mono text-[11px] tracking-wider px-4 py-1.5 rounded-full border transition-colors ${styles[variant]}`}
-      >
-        {label}
-      </button>
-    );
-  }
-);
 
 function formatBirthday(raw: string): string {
   // Normalize YYYYMMDD (Apple compact format) to YYYY-MM-DD first

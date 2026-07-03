@@ -1,7 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type { AddressBook, SmartCollection, SmartGroup } from '@/types/contact';
+
+interface CurrentUser {
+  email: string;
+  role: 'admin' | 'user';
+}
 
 interface SidebarProps {
   addressbooks: AddressBook[];
@@ -39,6 +46,22 @@ export function Sidebar({
   onDedup,
 }: SidebarProps) {
   const allCount = addressbooks.reduce((sum, ab) => sum + ab.contact_count, 0);
+  const router = useRouter();
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setUser(data?.user ?? null))
+      .catch(() => setUser(null));
+  }, []);
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+    router.refresh();
+  }
 
   return (
     <aside className="bg-surface border-r border-divider-soft flex flex-col py-6 px-4">
@@ -149,6 +172,51 @@ export function Sidebar({
         />
         baikal.skords.de · {syncStatus === 'syncing' ? 'syncing…' : syncStatus === 'error' ? 'Fehler · retry' : 'synced'}
       </button>
+
+      <div className="relative mt-2 pt-2 border-t border-divider-soft">
+        <button
+          onClick={() => setAccountMenuOpen((v) => !v)}
+          className="press flex items-center gap-1.5 font-mono text-[11px] text-muted w-full text-left hover:text-foreground transition-colors cursor-pointer"
+        >
+          <span className="truncate">{user?.email ?? '…'}</span>
+        </button>
+        {accountMenuOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setAccountMenuOpen(false)} />
+            <div className="popover-in absolute left-0 bottom-full z-50 mb-1 bg-surface border border-divider rounded-lg shadow-lg py-1 min-w-[160px]">
+              <Link
+                href="/settings/carddav"
+                onClick={() => setAccountMenuOpen(false)}
+                className="block px-3 py-1.5 text-[13px] text-muted hover:text-accent hover:bg-[rgba(201,164,76,0.08)] transition-colors"
+              >
+                CardDAV-Konto
+              </Link>
+              {user?.role === 'admin' && (
+                <Link
+                  href="/admin/users"
+                  onClick={() => setAccountMenuOpen(false)}
+                  className="block px-3 py-1.5 text-[13px] text-muted hover:text-accent hover:bg-[rgba(201,164,76,0.08)] transition-colors"
+                >
+                  Nutzerverwaltung
+                </Link>
+              )}
+              <Link
+                href="/change-password"
+                onClick={() => setAccountMenuOpen(false)}
+                className="block px-3 py-1.5 text-[13px] text-muted hover:text-accent hover:bg-[rgba(201,164,76,0.08)] transition-colors"
+              >
+                Passwort ändern
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="block w-full text-left px-3 py-1.5 text-[13px] text-muted hover:text-red-400 hover:bg-[rgba(201,164,76,0.08)] transition-colors"
+              >
+                Abmelden
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </aside>
   );
 }

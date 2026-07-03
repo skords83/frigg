@@ -1,12 +1,17 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 
 const apiUrl = process.env.API_URL || 'http://localhost:3001';
 
 export async function syncContacts(): Promise<{ ok: boolean }> {
   try {
-    const res = await fetch(`${apiUrl}/api/sync`, { method: 'POST' });
+    const cookieHeader = (await cookies()).toString();
+    const res = await fetch(`${apiUrl}/api/sync`, {
+      method: 'POST',
+      headers: { Cookie: cookieHeader },
+    });
     if (!res.ok) return { ok: false };
     revalidatePath('/');
     return { ok: true };
