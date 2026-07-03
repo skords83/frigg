@@ -1,20 +1,30 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import contactsRouter from './routes/contacts';
 import addressbooksRouter from './routes/addressbooks';
 import syncRouter from './routes/sync';
+import authRouter from './routes/auth';
+import adminRouter from './routes/admin';
 import { startSyncSchedule } from './sync';
 import { runBootstrap } from './bootstrap';
+import { requireAuth, requireActive, requireAdmin } from './auth/middleware';
 
 const app = express();
 
+// Behind Traefik — needed so req.ip / rate limiting see the real client IP.
+app.set('trust proxy', 1);
+
 app.use(cors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000' }));
 app.use(express.json({ limit: '20mb' })); // photos can be sizeable
+app.use(cookieParser());
 
-app.use('/api/contacts', contactsRouter);
-app.use('/api/addressbooks', addressbooksRouter);
-app.use('/api/sync', syncRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/admin', requireAuth, requireActive, requireAdmin, adminRouter);
+app.use('/api/contacts', requireAuth, requireActive, contactsRouter);
+app.use('/api/addressbooks', requireAuth, requireActive, addressbooksRouter);
+app.use('/api/sync', requireAuth, requireActive, syncRouter);
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 

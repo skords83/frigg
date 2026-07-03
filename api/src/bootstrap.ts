@@ -18,14 +18,15 @@ export async function runBootstrap(): Promise<void> {
     return;
   }
 
+  const normalizedEmail = email.toLowerCase();
   const passwordHash = await hashPassword(password);
   const [admin] = await query<{ id: string }>(
     `INSERT INTO users (email, password_hash, role, must_change_password)
      VALUES ($1, $2, 'admin', true)
      RETURNING id`,
-    [email, passwordHash]
+    [normalizedEmail, passwordHash]
   );
-  console.log(`[bootstrap] created initial admin ${email} (must change password on first login)`);
+  console.log(`[bootstrap] created initial admin ${normalizedEmail} (must change password on first login)`);
 
   // Preserve continuity for whatever CARDDAV_* credentials were used before multi-account
   // support existed: turn them into this admin's carddav_accounts row, and hand ownership
