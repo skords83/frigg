@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { ActionButton, FormSection, inputCls, AddButton, RemoveButton } from '@/components/form-helpers';
+import { Select } from '@/components/Select';
 import type { AddressBook } from '@/types/contact';
 
 interface CardDavAccount {
@@ -249,12 +250,9 @@ function SharingRow({ book, users }: { book: AddressBook; users: LightUser[] }) 
           ))}
       </div>
       {pickerOpen ? (
-        <select
-          autoFocus
-          className="mt-1.5 bg-transparent border border-divider rounded-md px-2 py-1 text-[11px] font-mono text-muted focus:outline-none focus:border-accent-dim"
-          defaultValue=""
-          onChange={async (e) => {
-            const userId = e.target.value;
+        <Select
+          value=""
+          onValueChange={async (userId) => {
             setPickerOpen(false);
             if (!userId) return;
             await fetch(`/api/addressbooks/${book.id}/access`, {
@@ -264,17 +262,12 @@ function SharingRow({ book, users }: { book: AddressBook; users: LightUser[] }) 
             });
             loadGrants();
           }}
-          onBlur={() => setPickerOpen(false)}
-        >
-          <option value="" disabled>
-            Nutzer wählen …
-          </option>
-          {shareable.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.email}
-            </option>
-          ))}
-        </select>
+          options={shareable.map((u) => ({ value: u.id, label: u.email }))}
+          placeholder="Nutzer wählen …"
+          open={pickerOpen}
+          onOpenChange={(o) => { if (!o) setPickerOpen(false); }}
+          triggerClassName="mt-1.5 bg-transparent border border-divider rounded-md px-2 py-1 text-[11px] font-mono text-muted focus:outline-none focus:border-accent-dim flex items-center justify-between gap-1.5 cursor-pointer"
+        />
       ) : (
         shareable.length > 0 && <AddButton onClick={() => setPickerOpen(true)} />
       )}

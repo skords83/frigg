@@ -1,4 +1,5 @@
 import { forwardRef, useState, useRef, type ReactNode } from 'react';
+import { Select } from './Select';
 
 /** Shared enter/exit timing for the four modals — waits out the CSS exit animation before unmounting. */
 export function useModalClose(onClose: () => void, duration = 130) {
@@ -122,23 +123,22 @@ export function LabelSelect({ value, options, onChange }: { value: string; optio
   }
 
   return (
-    <select
-      className="bg-transparent border border-divider rounded-md px-2 py-1.5 text-[11px] font-mono text-muted focus:outline-none focus:border-accent-dim transition-colors w-[90px] shrink-0"
+    <Select
       value={value}
-      onChange={(e) => {
-        if (e.target.value === '__custom__') {
+      onValueChange={(v) => {
+        if (v === '__custom__') {
           setDraft(isCustom ? value : '');
           setIsEditing(true);
         } else {
-          onChange(e.target.value);
+          onChange(v);
         }
       }}
-    >
-      {allOptions.map((o) => (
-        <option key={o} value={o}>{o}</option>
-      ))}
-      <option value="__custom__">Eigenes …</option>
-    </select>
+      options={[
+        ...allOptions.map((o) => ({ value: o, label: o })),
+        { value: '__custom__', label: 'Eigenes …' },
+      ]}
+      triggerClassName="bg-transparent border border-divider rounded-md px-2 py-1.5 text-[11px] font-mono text-muted focus:outline-none focus:border-accent-dim transition-colors w-[90px] shrink-0 flex items-center justify-between gap-1 cursor-pointer"
+    />
   );
 }
 

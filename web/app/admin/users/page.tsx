@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { ActionButton, FormSection, inputCls, AddButton } from '@/components/form-helpers';
+import { Select } from '@/components/Select';
 
 interface AdminUser {
   id: string;
@@ -174,14 +175,15 @@ function NewUserForm({
         onChange={(e) => setEmail(e.target.value)}
         required
       />
-      <select
-        className="bg-transparent border border-divider rounded-md px-2.5 py-1.5 text-[13px] text-foreground focus:outline-none focus:border-accent-dim"
+      <Select
         value={role}
-        onChange={(e) => setRole(e.target.value as 'admin' | 'user')}
-      >
-        <option value="user">Nutzer</option>
-        <option value="admin">Administrator</option>
-      </select>
+        onValueChange={(v) => setRole(v as 'admin' | 'user')}
+        options={[
+          { value: 'user', label: 'Nutzer' },
+          { value: 'admin', label: 'Administrator' },
+        ]}
+        triggerClassName="bg-transparent border border-divider rounded-md px-2.5 py-1.5 text-[13px] text-foreground focus:outline-none focus:border-accent-dim flex items-center justify-between gap-2 cursor-pointer"
+      />
       {error && <p className="text-[12px] text-red-500 font-mono">{error}</p>}
       <div className="flex justify-end gap-3 mt-1">
         <ActionButton label="Abbrechen" onClick={onCancel} />

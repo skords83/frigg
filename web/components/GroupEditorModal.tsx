@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { SmartGroup, GroupRule, GroupRuleField, GroupRuleOperator } from '@/types/contact';
 import { useModalClose } from './form-helpers';
+import { Select } from './Select';
 
 interface GroupEditorModalProps {
   initial?: SmartGroup;
@@ -126,25 +127,19 @@ export function GroupEditorModal({ initial, onSave, onClose }: GroupEditorModalP
             <div className="space-y-2">
               {rules.map((rule, i) => (
                 <div key={i} className="flex gap-2 items-center">
-                  <select
-                    className={selectCls}
+                  <Select
                     value={rule.field}
-                    onChange={(e) => updateRule(i, { field: e.target.value as GroupRuleField })}
-                  >
-                    {(Object.keys(FIELD_LABELS) as GroupRuleField[]).map((f) => (
-                      <option key={f} value={f}>{FIELD_LABELS[f]}</option>
-                    ))}
-                  </select>
+                    onValueChange={(v) => updateRule(i, { field: v as GroupRuleField })}
+                    options={(Object.keys(FIELD_LABELS) as GroupRuleField[]).map((f) => ({ value: f, label: FIELD_LABELS[f] }))}
+                    triggerClassName={selectCls + ' inline-flex items-center gap-1.5'}
+                  />
 
-                  <select
-                    className={selectCls}
+                  <Select
                     value={rule.operator}
-                    onChange={(e) => updateRule(i, { operator: e.target.value as GroupRuleOperator, value: '' })}
-                  >
-                    {(Object.keys(OPERATOR_LABELS) as GroupRuleOperator[]).map((op) => (
-                      <option key={op} value={op}>{OPERATOR_LABELS[op]}</option>
-                    ))}
-                  </select>
+                    onValueChange={(v) => updateRule(i, { operator: v as GroupRuleOperator, value: '' })}
+                    options={(Object.keys(OPERATOR_LABELS) as GroupRuleOperator[]).map((op) => ({ value: op, label: OPERATOR_LABELS[op] }))}
+                    triggerClassName={selectCls + ' inline-flex items-center gap-1.5'}
+                  />
 
                   {!VALUE_LESS.includes(rule.operator) && (
                     <input

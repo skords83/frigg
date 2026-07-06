@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { Contact, AddressBook, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
 import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToIso, normalizePhone } from './form-helpers';
+import { Select } from './Select';
 
 interface NewContactModalProps {
   addressbooks: AddressBook[];
@@ -93,15 +94,12 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
           {/* Adressbuch (nur wenn mehrere vorhanden) */}
           {addressbooks.length > 1 && (
             <FormSection label="Adressbuch">
-              <select
-                className={inputCls + ' w-full'}
+              <Select
                 value={addressbookId}
-                onChange={(e) => setAddressbookId(e.target.value)}
-              >
-                {addressbooks.map((ab) => (
-                  <option key={ab.id} value={ab.id}>{ab.display_name}</option>
-                ))}
-              </select>
+                onValueChange={setAddressbookId}
+                options={addressbooks.map((ab) => ({ value: ab.id, label: ab.display_name }))}
+                triggerClassName={inputCls + ' w-full flex items-center justify-between gap-2 cursor-pointer'}
+              />
             </FormSection>
           )}
 
