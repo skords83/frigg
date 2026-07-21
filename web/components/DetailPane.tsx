@@ -32,11 +32,11 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
 
   async function handleDelete() {
     if (!contact) return;
-    if (!confirm(`„${contact.fn}" wirklich löschen?`)) return;
-    await fetch(`/api/contacts/${contact.uid}`, {
+    const res = await fetch(`/api/contacts/${contact.uid}`, {
       method: 'DELETE',
       headers: { 'If-Match': contact.etag },
     });
+    if (!res.ok) return;
     if (onDelete) {
       onDelete(contact.uid);
     } else {
@@ -60,6 +60,15 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
       {editing && (
         <EditModal contact={contact} onClose={handleClose} onSave={handleSaved} />
       )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Kontakt löschen"
+          message={`„${contact.fn}" wirklich löschen? Dies kann nicht rückgängig gemacht werden.`}
+          confirmLabel="Löschen"
+          onConfirm={handleDelete}
+          onClose={() => setConfirmDelete(false)}
+        />
+      )}
       <div key={contact.uid} className="detail-enter">
         {/* Header */}
         <div className="flex flex-col items-center text-center mb-9">
@@ -69,7 +78,7 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
           <div className="flex gap-2.5 mt-5">
             <ActionButton ref={editBtnRef} label="Bearbeiten" onClick={() => setEditing(true)} variant="primary" />
             <ActionButton label="Teilen" onClick={() => {}} />
-            <ActionButton label="Löschen" onClick={handleDelete} variant="danger" />
+            <ActionButton label="Löschen" onClick={() => setConfirmDelete(true)} variant="danger" />
           </div>
         </div>
 
