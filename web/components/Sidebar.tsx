@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { AddressBook, SmartCollection, SmartGroup } from '@/types/contact';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface CurrentUser {
   email: string;
@@ -12,6 +13,7 @@ interface CurrentUser {
 
 interface SidebarProps {
   addressbooks: AddressBook[];
+  addressbookCounts: Record<string, number>;
   selected: string | SmartCollection;
   onSelect: (id: string | SmartCollection) => void;
   recentCount: number;
@@ -30,6 +32,7 @@ interface SidebarProps {
 
 export function Sidebar({
   addressbooks,
+  addressbookCounts,
   selected,
   onSelect,
   recentCount,
@@ -45,7 +48,7 @@ export function Sidebar({
   onDeleteGroup,
   onDedup,
 }: SidebarProps) {
-  const allCount = addressbooks.reduce((sum, ab) => sum + ab.contact_count, 0);
+  const allCount = Object.values(addressbookCounts).reduce((sum, c) => sum + c, 0);
   const router = useRouter();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -89,7 +92,7 @@ export function Sidebar({
           <SidebarItem
             key={ab.id}
             label={ab.display_name}
-            count={ab.contact_count}
+            count={addressbookCounts[ab.id] ?? 0}
             active={selected === ab.id}
             onClick={() => onSelect(ab.id)}
             onDrop={(uid) => onMoveContact(uid, ab.id)}
@@ -245,6 +248,7 @@ function GroupItem({
   onDelete: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
     <li className="relative">
@@ -280,11 +284,20 @@ function GroupItem({
               className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-surface-raised transition-colors"
             >Bearbeiten</button>
             <button
-              onClick={() => { setMenuOpen(false); onDelete(); }}
+              onClick={() => { setMenuOpen(false); setConfirmDelete(true); }}
               className="w-full text-left px-3 py-1.5 text-[13px] text-red-400 hover:bg-surface-raised transition-colors"
             >Löschen</button>
           </div>
         </>
+      )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Gruppe löschen"
+          message={`Gruppe „${group.name}" wirklich löschen?`}
+          confirmLabel="Löschen"
+          onConfirm={onDelete}
+          onClose={() => setConfirmDelete(false)}
+        />
       )}
     </li>
   );

@@ -35,6 +35,10 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     setContacts(initialContacts);
   }, [initialContacts]);
 
+  useEffect(() => {
+    setAddressbooks(initialAddressbooks);
+  }, [initialAddressbooks]);
+
   const filtered = useMemo(() => {
     let result = contacts;
     if (selected === 'recent') {
@@ -68,6 +72,14 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     return counts;
   }, [contacts, smartGroups]);
 
+  const addressbookCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const c of contacts) {
+      counts[c.addressbook_id] = (counts[c.addressbook_id] ?? 0) + 1;
+    }
+    return counts;
+  }, [contacts]);
+
   const selectedContact = selectedUid ? contacts.find((c) => c.uid === selectedUid) ?? null : null;
 
   function handleUpdate(updated: Contact) {
@@ -77,6 +89,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   function handleDelete(uid: string) {
     setContacts((prev) => prev.filter((c) => c.uid !== uid));
     setSelectedUid(null);
+    invalidateContacts().then(() => router.refresh());
   }
 
   function handleCreate(contact: Contact) {
@@ -88,7 +101,6 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
 
   async function moveContact(uid: string, targetBookId: string) {
     try {
-      const sourceBookId = contacts.find((c) => c.uid === uid)?.addressbook_id;
       const res = await fetch(`/api/contacts/${encodeURIComponent(uid)}/move`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -97,13 +109,6 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
       if (!res.ok) return;
       const updated: Contact = await res.json();
       setContacts((prev) => prev.map((c) => (c.uid === uid ? updated : c)));
-      if (sourceBookId && sourceBookId !== targetBookId) {
-        setAddressbooks((prev) => prev.map((ab) => {
-          if (ab.id === sourceBookId) return { ...ab, contact_count: ab.contact_count - 1 };
-          if (ab.id === targetBookId) return { ...ab, contact_count: ab.contact_count + 1 };
-          return ab;
-        }));
-      }
     } catch {
       // ignore
     }
@@ -113,6 +118,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     await fetch(`/api/contacts/${encodeURIComponent(discard.uid)}`, { method: 'DELETE' });
     setContacts((prev) => prev.filter((c) => c.uid !== discard.uid));
     if (selectedUid === discard.uid) setSelectedUid(keep.uid);
+    invalidateContacts().then(() => router.refresh());
   }
 
   async function handleSync() {
@@ -152,6 +158,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
       )}
       <Sidebar
         addressbooks={addressbooks}
+        addressbookCounts={addressbookCounts}
         selected={selected}
         onSelect={(id) => { setSelected(id); setSelectedUid(null); }}
         recentCount={recentCount}

@@ -5,6 +5,7 @@ import type { Contact } from '@/types/contact';
 import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 import { EditModal } from './EditModal';
+import { ConfirmDialog } from './ConfirmDialog';
 import { ActionButton } from './form-helpers';
 
 interface DetailPaneProps {
@@ -15,6 +16,7 @@ interface DetailPaneProps {
 
 export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
   const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const editBtnRef = useRef<HTMLButtonElement>(null);
 
   if (!contact) {
