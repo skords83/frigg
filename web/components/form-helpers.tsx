@@ -1,14 +1,27 @@
-import { forwardRef, useState, useRef, type ReactNode } from 'react';
+import { forwardRef, useState, useRef, useEffect, type ReactNode } from 'react';
 import { Select } from './Select';
 
 /** Shared enter/exit timing for the four modals — waits out the CSS exit animation before unmounting. */
 export function useModalClose(onClose: () => void, duration = 130) {
   const [closing, setClosing] = useState(false);
+  const closingRef = useRef(closing);
+  closingRef.current = closing;
 
   function requestClose(after: () => void = onClose) {
     setClosing(true);
     setTimeout(after, duration);
   }
+
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !closingRef.current) requestCloseRef.current();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   return { closing, requestClose };
 }
