@@ -94,11 +94,13 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
       .map((c) => ({ contact: c, days: daysUntilBirthday(c.birthday!) }))
       .sort((a, b) => a.days - b.days);
 
+    const currentYear = new Date().getFullYear();
     const monthGroups = new Map<string, typeof items>();
     for (const item of items) {
-      const parsed = parseBirthday(item.contact.birthday!);
-      if (!parsed) continue;
-      const key = new Date(2000, parsed.month - 1, 1).toLocaleDateString('de-DE', { month: 'long' });
+      const next = nextBirthdayOccurrence(item.contact.birthday!);
+      if (!next) continue;
+      const monthName = next.toLocaleDateString('de-DE', { month: 'long' });
+      const key = next.getFullYear() === currentYear ? monthName : `${monthName} · ${next.getFullYear()}`;
       if (!monthGroups.has(key)) monthGroups.set(key, []);
       monthGroups.get(key)!.push(item);
     }
@@ -237,13 +239,21 @@ function parseBirthday(raw: string): { month: number; day: number } | null {
   return null;
 }
 
-function daysUntilBirthday(raw: string): number {
+function nextBirthdayOccurrence(raw: string): Date | null {
   const parsed = parseBirthday(raw);
-  if (!parsed) return 999;
+  if (!parsed) return null;
   const today = new Date();
   const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   let next = new Date(today.getFullYear(), parsed.month - 1, parsed.day);
   if (next < todayMidnight) next = new Date(today.getFullYear() + 1, parsed.month - 1, parsed.day);
+  return next;
+}
+
+function daysUntilBirthday(raw: string): number {
+  const next = nextBirthdayOccurrence(raw);
+  if (!next) return 999;
+  const today = new Date();
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.round((next.getTime() - todayMidnight.getTime()) / 86400000);
 }
 
