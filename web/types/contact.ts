@@ -69,3 +69,9 @@ export interface SmartGroup {
   rules: GroupRule[];
   match: 'all' | 'any';
 }
+
+export interface ContactGroup {
+  id: string;
+  name: string;
+  member_uids: string[];
+}

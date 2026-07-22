@@ -65,6 +65,16 @@ export function invalidateAccountClient(accountId: string): void {
   clientCache.delete(accountId);
 }
 
+// Splits a multi-card vCard blob (e.g. an imported .vcf file with several
+// contacts concatenated) into individual per-card raw strings, each of which
+// can be fed to parseVCard() on its own.
+export function splitVCards(raw: string): string[] {
+  return raw
+    .split(/(?=BEGIN:VCARD)/i)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 export interface ParsedCard {
   uid: string;
   fn: string;

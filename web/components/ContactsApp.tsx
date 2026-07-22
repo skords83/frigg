@@ -2,15 +2,18 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Contact, AddressBook, SmartCollection, SmartGroup } from '@/types/contact';
+import type { Contact, AddressBook, SmartCollection, SmartGroup, ContactGroup } from '@/types/contact';
 import { syncContacts, invalidateContacts } from '@/app/actions';
 import { Sidebar } from './Sidebar';
 import { ContactList } from './ContactList';
 import { DetailPane } from './DetailPane';
 import { NewContactModal } from './NewContactModal';
 import { GroupEditorModal } from './GroupEditorModal';
+import { ManualGroupModal } from './ManualGroupModal';
+import { ExportImportModal } from './ExportImportModal';
 import { DedupModal } from './DedupModal';
 import { useSmartGroups, applySmartGroup } from './useSmartGroups';
+import { useGroups } from './useGroups';
 
 interface ContactsAppProps {
   initialContacts: Contact[];
@@ -27,9 +30,12 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [showNewContact, setShowNewContact] = useState(false);
   const [editingGroup, setEditingGroup] = useState<SmartGroup | null | 'new'>(null);
+  const [editingManualGroup, setEditingManualGroup] = useState<ContactGroup | null | 'new'>(null);
   const [showDedup, setShowDedup] = useState(false);
+  const [showExportImport, setShowExportImport] = useState(false);
 
   const { groups: smartGroups, addGroup, updateGroup, deleteGroup } = useSmartGroups();
+  const { groups: manualGroups, createGroup: createManualGroup, renameGroup: renameManualGroup, deleteGroup: deleteManualGroup, addMember, removeMember } = useGroups();
 
   useEffect(() => {
     setContacts(initialContacts);
@@ -51,11 +57,15 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
       const groupId = selected.slice(6);
       const group = smartGroups.find((g) => g.id === groupId);
       result = group ? applySmartGroup(contacts, group) : [];
+    } else if (typeof selected === 'string' && selected.startsWith('mgroup:')) {
+      const groupId = selected.slice(7);
+      const group = manualGroups.find((g) => g.id === groupId);
+      result = group ? contacts.filter((c) => group.member_uids.includes(c.uid)) : [];
     } else if (selected !== 'all') {
       result = contacts.filter((c) => c.addressbook_id === selected);
     }
     return result;
-  }, [contacts, selected, smartGroups]);
+  }, [contacts, selected, smartGroups, manualGroups]);
 
   const recentCount = useMemo(
     () => [...contacts].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 20).length,
@@ -71,6 +81,14 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     }
     return counts;
   }, [contacts, smartGroups]);
+
+  const manualGroupCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const g of manualGroups) {
+      counts[g.id] = g.member_uids.length;
+    }
+    return counts;
+  }, [manualGroups]);
 
   const addressbookCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -156,6 +174,25 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
           onClose={() => setEditingGroup(null)}
         />
       )}
+      {editingManualGroup !== null && (
+        <ManualGroupModal
+          initial={editingManualGroup === 'new' ? undefined : (editingManualGroup as ContactGroup)}
+          onSave={(name) => {
+            if (editingManualGroup === 'new') createManualGroup(name);
+            else renameManualGroup((editingManualGroup as ContactGroup).id, name);
+            setEditingManualGroup(null);
+          }}
+          onClose={() => setEditingManualGroup(null)}
+        />
+      )}
+      {showExportImport && (
+        <ExportImportModal
+          addressbooks={addressbooks}
+          manualGroups={manualGroups}
+          onImported={() => invalidateContacts().then(() => router.refresh())}
+          onClose={() => setShowExportImport(false)}
+        />
+      )}
       <Sidebar
         addressbooks={addressbooks}
         addressbookCounts={addressbookCounts}
@@ -175,7 +212,16 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
           deleteGroup(id);
           if (selected === `group:${id}`) setSelected('all');
         }}
+        manualGroups={manualGroups}
+        manualGroupCounts={manualGroupCounts}
+        onNewManualGroup={() => setEditingManualGroup('new')}
+        onRenameManualGroup={(g) => setEditingManualGroup(g)}
+        onDeleteManualGroup={(id) => {
+          deleteManualGroup(id);
+          if (selected === `mgroup:${id}`) setSelected('all');
+        }}
         onDedup={() => setShowDedup(true)}
+        onExportImport={() => setShowExportImport(true)}
       />
       <ContactList
         contacts={filtered}
@@ -186,7 +232,14 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         onNew={() => setShowNewContact(true)}
         view={selected === 'birthdays' ? 'birthday' : selected === 'recent' ? 'recent' : 'default'}
       />
-      <DetailPane contact={selectedContact} onUpdate={handleUpdate} onDelete={handleDelete} />
+      <DetailPane
+        contact={selectedContact}
+        onUpdate={handleUpdate}
+        onDelete={handleDelete}
+        groups={manualGroups}
+        onAddToGroup={addMember}
+        onRemoveFromGroup={removeMember}
+      />
     </div>
   );
 }

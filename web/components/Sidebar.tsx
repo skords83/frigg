@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { AddressBook, SmartCollection, SmartGroup } from '@/types/contact';
+import type { AddressBook, SmartCollection, SmartGroup, ContactGroup } from '@/types/contact';
 import { ConfirmDialog } from './ConfirmDialog';
 
 interface CurrentUser {
@@ -27,7 +27,13 @@ interface SidebarProps {
   onNewGroup: () => void;
   onEditGroup: (group: SmartGroup) => void;
   onDeleteGroup: (id: string) => void;
+  manualGroups: ContactGroup[];
+  manualGroupCounts: Record<string, number>;
+  onNewManualGroup: () => void;
+  onRenameManualGroup: (group: ContactGroup) => void;
+  onDeleteManualGroup: (id: string) => void;
   onDedup: () => void;
+  onExportImport: () => void;
 }
 
 export function Sidebar({
@@ -46,7 +52,13 @@ export function Sidebar({
   onNewGroup,
   onEditGroup,
   onDeleteGroup,
+  manualGroups,
+  manualGroupCounts,
+  onNewManualGroup,
+  onRenameManualGroup,
+  onDeleteManualGroup,
   onDedup,
+  onExportImport,
 }: SidebarProps) {
   const allCount = Object.values(addressbookCounts).reduce((sum, c) => sum + c, 0);
   const router = useRouter();
@@ -123,19 +135,45 @@ export function Sidebar({
         />
       </ul>
 
-      {/* Smart groups */}
+      {/* Manual groups */}
       <div className="flex items-center justify-between mt-5 mb-2 px-2">
         <p className="font-mono text-[10px] tracking-widest uppercase text-muted">Gruppen</p>
         <button
-          onClick={onNewGroup}
+          onClick={onNewManualGroup}
           className="text-muted hover:text-foreground text-[16px] leading-none transition-colors"
           title="Neue Gruppe"
         >+</button>
       </div>
-      {smartGroups.length === 0 && (
+      {manualGroups.length === 0 && (
         <p className="text-[12px] text-muted px-2 italic">Keine Gruppen</p>
       )}
       <ul role="listbox" aria-label="Gruppen">
+        {manualGroups.map((g) => (
+          <GroupItem
+            key={g.id}
+            group={g}
+            count={manualGroupCounts[g.id] ?? 0}
+            active={selected === `mgroup:${g.id}`}
+            onClick={() => onSelect(`mgroup:${g.id}`)}
+            onEdit={() => onRenameManualGroup(g)}
+            onDelete={() => onDeleteManualGroup(g.id)}
+          />
+        ))}
+      </ul>
+
+      {/* Rule-based filters */}
+      <div className="flex items-center justify-between mt-5 mb-2 px-2">
+        <p className="font-mono text-[10px] tracking-widest uppercase text-muted">Filter</p>
+        <button
+          onClick={onNewGroup}
+          className="text-muted hover:text-foreground text-[16px] leading-none transition-colors"
+          title="Neuer Filter"
+        >+</button>
+      </div>
+      {smartGroups.length === 0 && (
+        <p className="text-[12px] text-muted px-2 italic">Keine Filter</p>
+      )}
+      <ul role="listbox" aria-label="Filter">
         {smartGroups.map((g) => (
           <GroupItem
             key={g.id}
@@ -194,6 +232,12 @@ export function Sidebar({
               >
                 CardDAV-Konto
               </Link>
+              <button
+                onClick={() => { setAccountMenuOpen(false); onExportImport(); }}
+                className="block w-full text-left px-3 py-1.5 text-[13px] text-muted hover:text-accent hover:bg-[rgba(201,164,76,0.08)] transition-colors"
+              >
+                Export / Import
+              </button>
               {user?.role === 'admin' && (
                 <Link
                   href="/admin/users"
@@ -240,7 +284,7 @@ function GroupItem({
   onEdit,
   onDelete,
 }: {
-  group: SmartGroup;
+  group: { id: string; name: string };
   count: number;
   active: boolean;
   onClick: () => void;

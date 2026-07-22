@@ -2,44 +2,11 @@ import { Router, Response } from 'express';
 import { query, pool } from '../db';
 import { getClientForAddressbook, parseVCard, patchVCard, patchPhotoInVCard, escapeVCardValue, escapeVCardComponent, labelToVCardType } from '../carddav';
 import { getVisibleAddressbookIds, canAccessAddressbook } from '../auth/access';
+import { hasInvalidEmail, hasInvalidPhone, isInvalidBirthday, withoutEmptyPhones, createContact } from '../contactOps';
 import type { AuthedRequest } from '../auth/middleware';
 import type { ContactRow } from '../types';
 
 const router = Router();
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function hasInvalidEmail(emails: unknown): boolean {
-  if (!Array.isArray(emails)) return false;
-  return (emails as { value: string }[]).some((e) => e.value?.trim() && !EMAIL_RE.test(e.value.trim()));
-}
-
-const PHONE_RE = /^[0-9+\s()-]+$/;
-
-function hasInvalidPhone(phones: unknown): boolean {
-  if (!Array.isArray(phones)) return false;
-  return (phones as { value: string }[]).some((p) => p.value?.trim() && !PHONE_RE.test(p.value.trim()));
-}
-
-const BIRTHDAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-function isInvalidBirthday(birthday: unknown): boolean {
-  if (typeof birthday !== 'string' || !birthday.trim()) return false;
-  const m = birthday.trim().match(BIRTHDAY_RE);
-  if (!m) return true;
-  const year = Number(m[1]);
-  const month = Number(m[2]);
-  const day = Number(m[3]);
-  const date = new Date(year, month - 1, day);
-  // Date rolls over invalid days (e.g. Feb 31) into the next month, so a mismatch means the date doesn't exist.
-  return date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day;
-}
-
-// Entries with a selected type but an empty value must never be persisted.
-function withoutEmptyPhones(phones: unknown): { label: string; value: string }[] {
-  if (!Array.isArray(phones)) return [];
-  return (phones as { label: string; value: string }[]).filter((p) => p?.value?.trim());
-}
 
 // GET /api/contacts
 router.get('/', async (req: AuthedRequest, res: Response) => {
@@ -128,37 +95,9 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
       return res.status(403).json({ error: 'forbidden' });
     }
 
-    const uid = crypto.randomUUID();
-    const rawVcard = buildVCard({ uid, fn, given_name, family_name, org, title, birthday, note, phones, emails, addresses });
-
-    const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [addressbook_id]);
-    if (!book) return res.status(400).json({ error: 'address book not found' });
-    const client = await getClientForAddressbook(addressbook_id);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: any = await client.createVCard({
-      addressBook: { url: book.url },
-      filename: `${uid}.vcf`,
-      vCardString: rawVcard,
+    const created = await createContact(addressbook_id, {
+      fn, given_name, family_name, org, title, birthday, note, phones, emails, addresses,
     });
-
-    const etag = (result?.etag as string | undefined) ?? '';
-
-    await pool.query(
-      `INSERT INTO contacts
-         (uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-          birthday, note, photo_data_uri, phones, emails, addresses, raw_vcard)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULL,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
-      [uid, addressbook_id, etag, fn ?? `${given_name} ${family_name}`.trim(),
-       given_name ?? '', family_name ?? '', org ?? null, title ?? null,
-       birthday ?? null, note ?? null,
-       JSON.stringify(phones ?? []),
-       JSON.stringify(emails ?? []),
-       JSON.stringify(addresses ?? []),
-       rawVcard]
-    );
-
-    const [created] = await query<ContactRow>('SELECT * FROM contacts WHERE uid = $1', [uid]);
     res.status(201).json(created);
   } catch (err) {
     console.error(err);
@@ -437,46 +376,5 @@ router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
     res.status(500).json({ error: 'internal' });
   }
 });
-
-function buildVCard(fields: {
-  uid: string;
-  fn?: string;
-  given_name?: string;
-  family_name?: string;
-  org?: string;
-  title?: string;
-  birthday?: string;
-  note?: string;
-  phones?: Array<{ label: string; value: string }>;
-  emails?: Array<{ label: string; value: string }>;
-  addresses?: Array<{ label: string; street: string; city: string; zip: string; state?: string; country?: string }>;
-}): string {
-  const lines: string[] = ['BEGIN:VCARD', 'VERSION:4.0', `UID:${fields.uid}`];
-
-  const fn = fields.fn ?? `${fields.given_name ?? ''} ${fields.family_name ?? ''}`.trim();
-  lines.push(`FN:${fn}`);
-  lines.push(`N:${fields.family_name ?? ''};${fields.given_name ?? ''};;;`);
-
-  if (fields.org) lines.push(`ORG:${fields.org}`);
-  if (fields.title) lines.push(`TITLE:${fields.title}`);
-  if (fields.birthday) lines.push(`BDAY:${fields.birthday}`);
-  if (fields.note) lines.push(`NOTE:${fields.note.replace(/\n/g, '\\n')}`);
-
-  for (const p of fields.phones ?? []) {
-    const type = labelToVCardType(p.label);
-    lines.push(`TEL;TYPE=${type}:${p.value}`);
-  }
-  for (const e of fields.emails ?? []) {
-    const type = labelToVCardType(e.label);
-    lines.push(`EMAIL;TYPE=${type}:${e.value}`);
-  }
-  for (const a of fields.addresses ?? []) {
-    const type = labelToVCardType(a.label);
-    lines.push(`ADR;TYPE=${type}:;;${a.street};${a.city};${a.state ?? ''};${a.zip};${a.country ?? ''}`);
-  }
-
-  lines.push('END:VCARD');
-  return lines.join('\r\n');
-}
 
 export default router;

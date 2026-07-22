@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import type { Contact } from '@/types/contact';
+import type { Contact, ContactGroup } from '@/types/contact';
 import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 import { EditModal } from './EditModal';
@@ -12,9 +12,12 @@ interface DetailPaneProps {
   contact: Contact | null;
   onUpdate?: (updated: Contact) => void;
   onDelete?: (uid: string) => void;
+  groups?: ContactGroup[];
+  onAddToGroup?: (groupId: string, contactUid: string) => void;
+  onRemoveFromGroup?: (groupId: string, contactUid: string) => void;
 }
 
-export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
+export function DetailPane({ contact, onUpdate, onDelete, groups = [], onAddToGroup, onRemoveFromGroup }: DetailPaneProps) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const editBtnRef = useRef<HTMLButtonElement>(null);
@@ -139,9 +142,84 @@ export function DetailPane({ contact, onUpdate, onDelete }: DetailPaneProps) {
                 <p className="text-[13px] text-muted italic leading-relaxed">{renderNoteWithLinks(contact.note)}</p>
               </FieldGroup>
             )}
+
+            {(onAddToGroup || groups.length > 0) && (
+              <FieldGroup label="Gruppen">
+                <GroupChips
+                  contact={contact}
+                  groups={groups}
+                  onAdd={onAddToGroup ? (groupId) => onAddToGroup(groupId, contact.uid) : undefined}
+                  onRemove={onRemoveFromGroup ? (groupId) => onRemoveFromGroup(groupId, contact.uid) : undefined}
+                />
+              </FieldGroup>
+            )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function GroupChips({
+  contact,
+  groups,
+  onAdd,
+  onRemove,
+}: {
+  contact: Contact;
+  groups: ContactGroup[];
+  onAdd?: (groupId: string) => void;
+  onRemove?: (groupId: string) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const memberOf = groups.filter((g) => g.member_uids.includes(contact.uid));
+  const available = groups.filter((g) => !g.member_uids.includes(contact.uid));
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 py-1">
+      {memberOf.map((g) => (
+        <span
+          key={g.id}
+          className="inline-flex items-center gap-1 bg-surface-raised border border-divider-soft rounded-full px-2.5 py-1 text-[12px] text-foreground"
+        >
+          {g.name}
+          {onRemove && (
+            <button
+              onClick={() => onRemove(g.id)}
+              className="text-muted hover:text-red-400 transition-colors leading-none"
+            >×</button>
+          )}
+        </span>
+      ))}
+      {memberOf.length === 0 && (
+        <span className="text-[13px] text-muted italic">Keiner Gruppe zugeordnet</span>
+      )}
+      {onAdd && (
+        <div className="relative">
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            className="w-6 h-6 flex items-center justify-center rounded-full border border-divider-soft text-muted hover:text-accent hover:border-accent-dim transition-colors text-[14px] leading-none"
+            title="Zu Gruppe hinzufügen"
+          >+</button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+              <div className="popover-in absolute left-0 top-full z-50 mt-1 bg-surface border border-divider rounded-lg shadow-lg py-1 min-w-[160px] max-h-56 overflow-y-auto">
+                {available.length === 0 && (
+                  <p className="px-3 py-1.5 text-[12.5px] text-muted italic">Keine weiteren Gruppen</p>
+                )}
+                {available.map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => { onAdd(g.id); setMenuOpen(false); }}
+                    className="block w-full text-left px-3 py-1.5 text-[13px] hover:bg-surface-raised transition-colors"
+                  >{g.name}</button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

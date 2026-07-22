@@ -9,6 +9,8 @@ import authRouter from './routes/auth';
 import adminRouter from './routes/admin';
 import carddavAccountsRouter from './routes/carddav-accounts';
 import usersRouter from './routes/users';
+import groupsRouter from './routes/groups';
+import transferRouter from './routes/transfer';
 import { startSyncSchedule } from './sync';
 import { runBootstrap } from './bootstrap';
 import { requireAuth, requireActive, requireAdmin } from './auth/middleware';
@@ -29,6 +31,8 @@ app.use('/api/addressbooks', requireAuth, requireActive, addressbooksRouter);
 app.use('/api/sync', requireAuth, requireActive, syncRouter);
 app.use('/api/carddav-accounts', requireAuth, requireActive, carddavAccountsRouter);
 app.use('/api/users', requireAuth, requireActive, usersRouter);
+app.use('/api/groups', requireAuth, requireActive, groupsRouter);
+app.use('/api/transfer', requireAuth, requireActive, transferRouter);
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
