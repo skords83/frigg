@@ -21,6 +21,20 @@ function hasInvalidPhone(phones: unknown): boolean {
   return (phones as { value: string }[]).some((p) => p.value?.trim() && !PHONE_RE.test(p.value.trim()));
 }
 
+const BIRTHDAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function isInvalidBirthday(birthday: unknown): boolean {
+  if (typeof birthday !== 'string' || !birthday.trim()) return false;
+  const m = birthday.trim().match(BIRTHDAY_RE);
+  if (!m) return true;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const date = new Date(year, month - 1, day);
+  // Date rolls over invalid days (e.g. Feb 31) into the next month, so a mismatch means the date doesn't exist.
+  return date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day;
+}
+
 // Entries with a selected type but an empty value must never be persisted.
 function withoutEmptyPhones(phones: unknown): { label: string; value: string }[] {
   if (!Array.isArray(phones)) return [];
@@ -106,6 +120,9 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
     if (hasInvalidPhone(phones)) {
       return res.status(400).json({ error: 'invalid_phone' });
     }
+    if (isInvalidBirthday(birthday)) {
+      return res.status(400).json({ error: 'invalid_birthday' });
+    }
 
     if (!(await canAccessAddressbook(req.user!.id, addressbook_id))) {
       return res.status(403).json({ error: 'forbidden' });
@@ -175,6 +192,9 @@ router.put('/:uid', async (req: AuthedRequest, res: Response) => {
     }
     if (hasInvalidPhone(phones)) {
       return res.status(400).json({ error: 'invalid_phone' });
+    }
+    if (isInvalidBirthday(birthday)) {
+      return res.status(400).json({ error: 'invalid_birthday' });
     }
 
     // Patch only the known fields into the raw vCard (preserves unknown properties).

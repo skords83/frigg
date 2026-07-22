@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import type { Contact, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
 import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToDisplay, birthdayToIso, normalizePhone, isValidEmail, isValidPhone } from './form-helpers';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToDisplay, birthdayToIso, normalizePhone, isValidEmail, isValidPhone, isValidBirthday } from './form-helpers';
 
 interface EditModalProps {
   contact: Contact;
@@ -46,6 +46,10 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
     }
     if (phones.some((p) => p.value.trim() && !isValidPhone(p.value))) {
       setError('Telefonnummer: nur Ziffern, +, Leerzeichen, Klammern und Bindestrich erlaubt.');
+      return;
+    }
+    if (!isValidBirthday(birthday)) {
+      setError('Bitte ein gültiges Geburtsdatum (TT.MM.JJJJ) angeben.');
       return;
     }
     setSaving(true);

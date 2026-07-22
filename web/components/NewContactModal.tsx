@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Contact, AddressBook, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToIso, normalizePhone, isValidEmail, isValidPhone } from './form-helpers';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToIso, normalizePhone, isValidEmail, isValidPhone, isValidBirthday } from './form-helpers';
 import { Select } from './Select';
 
 interface NewContactModalProps {
@@ -37,6 +37,10 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
     }
     if (phones.some((p) => p.value.trim() && !isValidPhone(p.value))) {
       setError('Telefonnummer: nur Ziffern, +, Leerzeichen, Klammern und Bindestrich erlaubt.');
+      return;
+    }
+    if (!isValidBirthday(birthday)) {
+      setError('Bitte ein gültiges Geburtsdatum (TT.MM.JJJJ) angeben.');
       return;
     }
     setSaving(true);

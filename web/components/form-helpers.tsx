@@ -29,6 +29,19 @@ export function birthdayToIso(display: string): string {
   return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
 }
 
+export function isValidBirthday(display: string): boolean {
+  const s = display.trim();
+  if (!s) return true;
+  const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (!m) return false;
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  const date = new Date(year, month - 1, day);
+  // Date rolls over invalid days (e.g. 31.02.) into the next month, so a mismatch means the date doesn't exist.
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
 export function normalizePhone(v: string): string {
   const s = v.trim();
   if (!s) return s;
