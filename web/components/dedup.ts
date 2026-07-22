@@ -31,7 +31,6 @@ function levenshtein(a: string, b: string): number {
 }
 
 function stringSimilarity(a: string, b: string): number {
-  if (!a && !b) return 1;
   if (!a || !b) return 0;
   const maxLen = Math.max(a.length, b.length);
   return 1 - levenshtein(a, b) / maxLen;
@@ -69,17 +68,19 @@ export function findDuplicates(contacts: Contact[]): DuplicatePair[] {
       const aName = normalize(`${a.given_name ?? ''} ${a.family_name ?? ''}`);
       const bName = normalize(`${b.given_name ?? ''} ${b.family_name ?? ''}`);
       const nameSim = stringSimilarity(aName, bName);
-      if (nameSim >= 0.9) {
+      if (nameSim >= 0.93) {
         score += 0.5;
         reasons.push('Sehr ähnlicher Name');
-      } else if (nameSim >= 0.75) {
+      } else if (nameSim >= 0.82) {
         score += 0.25;
         reasons.push('Ähnlicher Name');
       }
 
-      // Same org + similar name
-      if (a.org && b.org && normalize(a.org) === normalize(b.org) && nameSim >= 0.6) {
-        score += 0.15;
+      // Same org is only a weak tie-breaker on top of an already-similar name,
+      // never a signal on its own — colleagues at the same org are usually
+      // different people, not duplicates.
+      if (a.org && b.org && normalize(a.org) === normalize(b.org) && nameSim >= 0.82) {
+        score += 0.1;
         reasons.push(`Gleiche Firma: ${a.org}`);
       }
 
