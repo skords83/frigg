@@ -7,6 +7,26 @@ import type { ContactRow } from '../types';
 
 const router = Router();
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function hasInvalidEmail(emails: unknown): boolean {
+  if (!Array.isArray(emails)) return false;
+  return (emails as { value: string }[]).some((e) => e.value?.trim() && !EMAIL_RE.test(e.value.trim()));
+}
+
+const PHONE_RE = /^[0-9+\s()-]+$/;
+
+function hasInvalidPhone(phones: unknown): boolean {
+  if (!Array.isArray(phones)) return false;
+  return (phones as { value: string }[]).some((p) => p.value?.trim() && !PHONE_RE.test(p.value.trim()));
+}
+
+// Entries with a selected type but an empty value must never be persisted.
+function withoutEmptyPhones(phones: unknown): { label: string; value: string }[] {
+  if (!Array.isArray(phones)) return [];
+  return (phones as { label: string; value: string }[]).filter((p) => p?.value?.trim());
+}
+
 // GET /api/contacts
 router.get('/', async (req: AuthedRequest, res: Response) => {
   try {
@@ -77,7 +97,15 @@ router.get('/:uid/photo', async (req: AuthedRequest, res: Response) => {
 // POST /api/contacts — create new contact
 router.post('/', async (req: AuthedRequest, res: Response) => {
   try {
-    const { addressbook_id, fn, given_name, family_name, org, title, birthday, note, phones, emails, addresses } = req.body;
+    const { addressbook_id, fn, given_name, family_name, org, title, birthday, note, emails, addresses } = req.body;
+    const phones = withoutEmptyPhones(req.body.phones);
+
+    if (hasInvalidEmail(emails)) {
+      return res.status(400).json({ error: 'invalid_email' });
+    }
+    if (hasInvalidPhone(phones)) {
+      return res.status(400).json({ error: 'invalid_phone' });
+    }
 
     if (!(await canAccessAddressbook(req.user!.id, addressbook_id))) {
       return res.status(403).json({ error: 'forbidden' });
@@ -139,7 +167,15 @@ router.put('/:uid', async (req: AuthedRequest, res: Response) => {
       return res.status(409).json({ error: 'conflict', serverEtag: stored.etag });
     }
 
-    const { fn, given_name, family_name, org, title, birthday, note, phones, emails, addresses } = req.body;
+    const { fn, given_name, family_name, org, title, birthday, note, emails, addresses } = req.body;
+    const phones = req.body.phones !== undefined ? withoutEmptyPhones(req.body.phones) : undefined;
+
+    if (hasInvalidEmail(emails)) {
+      return res.status(400).json({ error: 'invalid_email' });
+    }
+    if (hasInvalidPhone(phones)) {
+      return res.status(400).json({ error: 'invalid_phone' });
+    }
 
     // Patch only the known fields into the raw vCard (preserves unknown properties).
     // Each value is pre-escaped by the caller; patchVCard writes them as-is.

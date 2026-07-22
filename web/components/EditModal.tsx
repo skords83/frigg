@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import type { Contact, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
 import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToDisplay, birthdayToIso, normalizePhone } from './form-helpers';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToDisplay, birthdayToIso, normalizePhone, isValidEmail, isValidPhone } from './form-helpers';
 
 interface EditModalProps {
   contact: Contact;
@@ -40,6 +40,14 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
   }
 
   async function handleSave() {
+    if (emails.some((e) => e.value.trim() && !isValidEmail(e.value))) {
+      setError('Bitte eine gültige E-Mail-Adresse angeben.');
+      return;
+    }
+    if (phones.some((p) => p.value.trim() && !isValidPhone(p.value))) {
+      setError('Telefonnummer: nur Ziffern, +, Leerzeichen, Klammern und Bindestrich erlaubt.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -72,7 +80,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
           title: title || null,
           birthday: birthday ? birthdayToIso(birthday) : null,
           note: note || null,
-          phones: phones.map((p) => ({ ...p, value: normalizePhone(p.value) })),
+          phones: phones.filter((p) => p.value.trim()).map((p) => ({ ...p, value: normalizePhone(p.value) })),
           emails,
           addresses,
         }),
@@ -80,6 +88,17 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
       if (res.status === 409) {
         setError('Konflikt: Der Kontakt wurde zwischenzeitlich geändert. Bitte neu laden.');
         return;
+      }
+      if (res.status === 400) {
+        const body = await res.json().catch(() => null);
+        if (body?.error === 'invalid_email') {
+          setError('Bitte eine gültige E-Mail-Adresse angeben.');
+          return;
+        }
+        if (body?.error === 'invalid_phone') {
+          setError('Telefonnummer: nur Ziffern, +, Leerzeichen, Klammern und Bindestrich erlaubt.');
+          return;
+        }
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const updated: Contact = await res.json();

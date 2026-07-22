@@ -37,6 +37,18 @@ export function normalizePhone(v: string): string {
   return s;
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function isValidEmail(v: string): boolean {
+  return EMAIL_RE.test(v.trim());
+}
+
+const PHONE_RE = /^[0-9+\s()-]+$/;
+
+export function isValidPhone(v: string): boolean {
+  return PHONE_RE.test(v.trim());
+}
+
 export const ActionButton = forwardRef<
   HTMLButtonElement,
   {

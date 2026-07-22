@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Contact, AddressBook, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToIso, normalizePhone } from './form-helpers';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToIso, normalizePhone, isValidEmail, isValidPhone } from './form-helpers';
 import { Select } from './Select';
 
 interface NewContactModalProps {
@@ -31,6 +31,14 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
       setError('Bitte mindestens Vor- oder Nachname oder Firma angeben.');
       return;
     }
+    if (emails.some((e) => e.value.trim() && !isValidEmail(e.value))) {
+      setError('Bitte eine gültige E-Mail-Adresse angeben.');
+      return;
+    }
+    if (phones.some((p) => p.value.trim() && !isValidPhone(p.value))) {
+      setError('Telefonnummer: nur Ziffern, +, Leerzeichen, Klammern und Bindestrich erlaubt.');
+      return;
+    }
     setSaving(true);
     setError(null);
     const fn = `${givenName} ${familyName}`.trim() || familyName || givenName;
@@ -47,11 +55,22 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
           title: title || null,
           birthday: birthday ? birthdayToIso(birthday) : null,
           note: note || null,
-          phones: phones.map((p) => ({ ...p, value: normalizePhone(p.value) })),
+          phones: phones.filter((p) => p.value.trim()).map((p) => ({ ...p, value: normalizePhone(p.value) })),
           emails,
           addresses,
         }),
       });
+      if (res.status === 400) {
+        const body = await res.json().catch(() => null);
+        if (body?.error === 'invalid_email') {
+          setError('Bitte eine gültige E-Mail-Adresse angeben.');
+          return;
+        }
+        if (body?.error === 'invalid_phone') {
+          setError('Telefonnummer: nur Ziffern, +, Leerzeichen, Klammern und Bindestrich erlaubt.');
+          return;
+        }
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const created: Contact = await res.json();
       requestClose(() => onCreate(created));
