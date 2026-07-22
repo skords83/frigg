@@ -18,7 +18,7 @@ interface ContactListProps {
   search: string;
   onSearchChange: (q: string) => void;
   onNew: () => void;
-  view?: 'default' | 'birthday';
+  view?: 'default' | 'birthday' | 'recent';
 }
 
 export function ContactList({ contacts, selectedUid, onSelect, search, onSearchChange, onNew, view = 'default' }: ContactListProps) {
@@ -125,6 +125,27 @@ export function ContactList({ contacts, selectedUid, onSelect, search, onSearchC
                 />
               ))}
             </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'recent') {
+    return (
+      <div className="bg-bg border-r border-divider-soft flex flex-col overflow-hidden">
+        {searchBar}
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length === 0 && (
+            <p className="text-muted text-[13px] px-4 py-8 text-center">Keine Kontakte gefunden</p>
+          )}
+          {filtered.map((c) => (
+            <ContactRow
+              key={c.uid}
+              contact={c}
+              selected={c.uid === selectedUid}
+              onSelect={onSelect}
+            />
           ))}
         </div>
       </div>
