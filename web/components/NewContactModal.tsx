@@ -86,12 +86,15 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
   }
 
   function updatePhone(i: number, p: PhoneEntry) {
+    setError(null);
     setPhones((prev) => prev.map((x, j) => (j === i ? p : x)));
   }
   function updateEmail(i: number, e: EmailEntry) {
+    setError(null);
     setEmails((prev) => prev.map((x, j) => (j === i ? e : x)));
   }
   function updateAddress(i: number, a: AddressEntry) {
+    setError(null);
     setAddresses((prev) => prev.map((x, j) => (j === i ? a : x)));
   }
 
@@ -129,22 +132,22 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
           {/* Name */}
           <FormSection label="Name">
             <div className="grid grid-cols-2 gap-3">
-              <FormField label="Vorname" value={givenName} onChange={setGivenName} />
-              <FormField label="Nachname" value={familyName} onChange={setFamilyName} />
+              <FormField label="Vorname" value={givenName} onChange={(v) => { setError(null); setGivenName(v); }} />
+              <FormField label="Nachname" value={familyName} onChange={(v) => { setError(null); setFamilyName(v); }} />
             </div>
           </FormSection>
 
           {/* Firma & Titel */}
           <FormSection label="Firma & Titel">
             <div className="grid grid-cols-2 gap-3">
-              <FormField label="Firma" value={org} onChange={setOrg} />
-              <FormField label="Titel" value={title} onChange={setTitle} />
+              <FormField label="Firma" value={org} onChange={(v) => { setError(null); setOrg(v); }} />
+              <FormField label="Titel" value={title} onChange={(v) => { setError(null); setTitle(v); }} />
             </div>
           </FormSection>
 
           {/* Geburtstag */}
           <FormSection label="Geburtstag">
-            <FormField label="TT.MM.JJJJ" value={birthday} onChange={setBirthday} />
+            <FormField label="TT.MM.JJJJ" value={birthday} onChange={(v) => { setError(null); setBirthday(v); }} />
           </FormSection>
 
           {/* Telefon */}
@@ -214,7 +217,7 @@ export function NewContactModal({ addressbooks, onClose, onCreate }: NewContactM
               className={inputCls + ' w-full resize-none'}
               rows={3}
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={(e) => { setError(null); setNote(e.target.value); }}
               placeholder="Notiz ..."
             />
           </FormSection>
