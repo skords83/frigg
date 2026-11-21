@@ -139,3 +139,40 @@ werden. Bei Teilfehlern beide Bücher sichern und vergleichen; keine automatisch
 Löschung zur „Bereinigung“. Rollback des Codes ändert keine Datenbankstruktur,
 würde aber alte unsichere Schreibpfade wieder aktivieren; vorher Schreibzugriffe
 stoppen. Folge-Migrationen benötigen gesonderte Vorwärts-/Wiederherstellungsnachweise.
+
+## PR 2: vCard-Bearbeitung und Drei-Wege-Konflikte
+
+Aufbauend auf PR 1 (separater Branch `feat/vcard-conflict-resolution`):
+
+- `vcardDocument.ts` hält strukturierte Inhaltszeilen mit Originalsyntax und
+  Eigenschaftsreferenzen. Nur explizit bearbeitete Werte werden serialisiert;
+  UTF-8-Faltung, Escaping, gruppierte Properties, zusätzliche N/ORG/ADR-Komponenten
+  und unbekannte Parameter bleiben erhalten. Nicht unterstützte Encodings werden
+  bei Bearbeitung blockiert. Unveränderte Felder werden nicht neu aufgebaut.
+- `vcf` bleibt als zusätzliche Parserprüfung erhalten, aber wird bewusst nicht
+  zum Neu-Serialisieren der gesamten Karte verwendet: der installierte Serializer
+  gruppiert Properties und ändert v3-Parameter in Großbuchstaben. Die begrenzte
+  syntaxerhaltende Schicht ersetzt die bisherigen Regex-Patches.
+- Erstellen nutzt dieselbe Serialisierung. vCard-Import überträgt Originaldaten
+  einschließlich UID und Foto; UID-Kollisionen werden noch konservativ blockiert.
+- Editor lädt vor Bearbeitung frisch vom Server. Text und Foto werden gemeinsam
+  bedingt geschrieben. Keine automatische Telefonnummer-Normalisierung beim
+  Speichern unveränderter Werte. Geburtstage ohne Jahr bleiben erhalten.
+- Drei-Wege-Dialog zeigt Basis, eigene und aktuelle Serverwerte; unveränderte
+  Felder stammen vom Server. Gleichzeitige Änderungen desselben Felds benötigen
+  eine explizite Wahl. Erneute Konflikte werden erneut verglichen; Abbruch lässt
+  Eingaben erhalten. Mehrwertige Felder bilden jeweils eine Entscheidungseinheit.
+- UI und API behandeln Eigenschaftsreferenzen als opake Bearbeitungsreferenzen.
+  Parameteränderungen durch andere Clients können die eigene Auswahl konservativ
+  blockieren (`stale_property`) statt fremde Metadaten falsch zuzuordnen.
+
+Validierung: 51 Unit-/HTTP-Tests erfolgreich. Drei Playwright-Browsertests
+(synthetischer API-Server, keine produktive Session) prüfen wiederholte Konflikte
+auf Desktop und bei 390px Dialogbreite, Abbruch sowie Verbindungsabbruch.
+Screenshots wurden geprüft; vorhandene Farben/Typografie/Komponenten bleiben.
+`@playwright/test` ist eine neue reine Entwicklungsabhängigkeit.
+
+Die Browserprüfung der mobilen Dialoge behebt noch nicht das im Altbestand feste
+Dreispalten-Hauptlayout. Vollständige mobile Navigation bleibt gesondert zu prüfen.
+Keine Migrationen in PR 2. Für Bestandsdaten liefert der neue Edit-Endpunkt aktuelle
+Eigenschaftsreferenzen ohne erzwungenen Massen-Reparse. API und Web gemeinsam ausrollen.

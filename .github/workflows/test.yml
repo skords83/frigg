@@ -18,3 +18,5 @@ jobs:
       - run: npm test
       - run: npm run build --workspace=api
       - run: npx tsc --noEmit --incremental false -p web/tsconfig.json
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
