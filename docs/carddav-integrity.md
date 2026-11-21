@@ -176,3 +176,78 @@ Die Browserprüfung der mobilen Dialoge behebt noch nicht das im Altbestand fest
 Dreispalten-Hauptlayout. Vollständige mobile Navigation bleibt gesondert zu prüfen.
 Keine Migrationen in PR 2. Für Bestandsdaten liefert der neue Edit-Endpunkt aktuelle
 Eigenschaftsreferenzen ohne erzwungenen Massen-Reparse. API und Web gemeinsam ausrollen.
+
+## PR 3: interne Identitäten und wiederaufnehmbare Kontaktoperationen
+
+Migration `005_contact_identity_operations.sql` ergänzt `vcard_uid` und ein
+Operationsjournal. Der bisherige Primärschlüssel `contacts.uid` wird **nicht**
+umgeschrieben oder gelöscht: er ist künftig die opake interne Kennung, auf die
+bestehende lokale Gruppen und UI-Verweise weiterhin zeigen. Die vCard-UID ist
+separat innerhalb eines Adressbuchs eindeutig. Neue Kontakte erhalten eine interne
+Kennung unabhängig von ihrer vCard-UID. Bestehende Kontaktdaten bleiben erhalten.
+
+Ein Move-/Merge-Plan enthält beide Original-Snapshots, Zieladresse und Ergebnis.
+Der Plan wird vor dem ersten Schreibversuch gespeichert. Zustände:
+`prepared → writing → target_verified → source_deleted → complete`.
+Nach Antwortverlust wird die feste Zieladresse gelesen; passende Ergebnisse werden
+nicht erneut geschrieben. Quelle und Ziel werden vor Fortsetzung auf Änderungen
+geprüft. Abbruch einer bereits kopierten, noch vorhandenen Quelle kann beide
+Kopien erhalten. Ein fehlgeschlagener Datenbankabschluss wird erneut ausgeführt.
+
+Der echte Merge zeigt alle Eigenschaften und Ergebniswerte. Mehrfachwerte werden
+vereinigt; unterschiedliche Einzelwerte benötigen Entscheidungen. Unbekannte
+widersprüchliche Eigenschaften, verschiedene vCard-Versionen und nicht sicher
+zuordenbare Property-Gruppen blockieren die Zusammenführung. Lokale Gruppen-
+mitgliedschaften werden beim lokalen Abschluss transaktional übertragen. Bekannte
+MEMBER-/RELATED-Referenzen auf die Quelle blockieren Move/Merge, damit keine
+Gruppenreferenz unbemerkt verwaist. Der ursprüngliche UID-Wert wird zusätzlich als
+`X-FRIGG-MERGED-UID` im Ergebnis erhalten.
+
+Aktive Journale blockieren den Sync der beteiligten Bücher; lokale Kontaktänderungen,
+Gruppenänderungen, Import und Sync verwenden denselben Prozess-übergreifenden
+PostgreSQL-Lock. Konkurrierende Anfragen bekommen `423 operation_busy` statt
+unbegrenzt Pool-Verbindungen zu belegen. „Offene Vorgänge“ bietet Vorschau,
+Wiederaufnahme und sicheres Behalten vorhandener Kopien.
+
+### Validierung und Integration
+
+- Migration 001–005 mit synthetischen Bestandskontakten und Gruppen auf PGlite
+  (echte PostgreSQL-Engine in WASM, Entwicklungsabhängigkeit) ausgeführt; 005
+  mehrfach wiederholt. Bestehende IDs/Referenzen erhalten; gleiche vCard-UID in
+  zwei Büchern erfolgreich gespeichert, Kollision im selben Buch abgewiesen.
+- Fehlerfolge für Move und Merge: verlorene PUT-Antwort, fehlgeschlagene Prüfung,
+  verlorene DELETE-Antwort, Datenbankfehler und fehlgeschlagener Abschluss-Checkpoint.
+  Wiederholung erzeugt keinen zusätzlichen PUT und verliert keine Quelle.
+- **Echter Baïkal 0.13.0 / sabre-dav 4.7.1** isoliert auf 127.0.0.1 mit temporärem
+  SQLite, synthetischem Benutzer und zwei Büchern gestartet. Release-SHA256 wird
+  vor Entpacken geprüft. PHP wurde lokal nur aus offiziellen Paketen in `/tmp`
+  entpackt; keine Systeminstallation und kein Zugriff auf produktive Dienste.
+- Integration durch die echten Express-Routen mit Session-Prüfung und verschlüsselten
+  synthetischen DAV-Zugangsdaten: CRUD, beliebiger Ressourcenname ohne `.vcf`,
+  gleiche UID in zwei Büchern, Konflikt nach noch nicht synchronisierter externer
+  Änderung, Merge einschließlich lokaler Gruppenmitgliedschaft, Move, Wiederholung
+  und Delta-Sync erfolgreich. Fremder Benutzer erhält keinen Zugriff auf Kontakt
+  oder Journal. PGlite ersetzt den PostgreSQL-Netzwerkprozess, nicht die SQL-Engine;
+  Mehrprozess-Lock-Verhalten ist dadurch noch kein echter PostgreSQL-Lasttest.
+- Baïkal lieferte bei fehlenden Multiget-Zielen ein leeres Ergebnis. Deshalb erfolgen
+  Einzelverifikation und Edit-Lesezugriffe jetzt per authentifiziertem GET mit
+  eindeutigem Status, vollständigem Inhalt und Response-ETag.
+- Der CI-Workflow lädt dieselbe geprüfte Baïkal-Version und führt `npm run test:baikal`
+  aus. Lokal: `FRIGG_BAIKAL_RELEASE=/pfad/zum/test-release npm run test:baikal`;
+  optional `FRIGG_TEST_PHP` und `FRIGG_TEST_PHP_EXT` für isolierte PHP-Laufzeiten.
+
+### Migration und Wiederherstellung
+
+Vor späterem Deployment API/Sync anhalten und PostgreSQL sowie CardDAV sichern.
+Migrationen 001–004 müssen vorhanden sein; dann 005 transaktional ausführen und
+API/Web gemeinsam starten. Keine Datenbereinigung, kein Löschen alter Spalten,
+keine automatische Gruppenumwandlung. Journal-Snapshots enthalten persönliche
+Daten und benötigen denselben Zugriffsschutz und dieselben Backups wie Kontakte.
+
+Nach 005 darf alter Code nicht weiter schreiben: er verwechselt interne und
+vCard-UIDs. Wiederherstellung erfolgt bei angehaltenen Schreibern aus dem vorab
+geprüften Datenbankbackup und den passenden CardDAV-Sicherungen. Kein pauschales
+SQL-Down-Skript, das neu entstandene Kontakte oder Journale verwirft. Bei einem
+Teilvorgang erst Journal und beide Serverressourcen vergleichen; niemals die
+Zielkopie automatisch löschen. Der vorhandene globale href-Index bleibt bestehen;
+mehrfach verbundene identische Serverressourcen werden konservativ blockiert.

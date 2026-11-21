@@ -17,13 +17,13 @@ async function upsertContact(
   const parsed = parseVCard(data);
   if (!parsed) return false;
 
-  // Until resource identities are migrated, fail closed on cross-book UID collisions.
+  // Preserve internal IDs and local memberships while scoping remote UIDs to a book.
   const result = await pool.query(
     `INSERT INTO contacts
-       (uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
+       (uid, vcard_uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
         birthday, note, photo_data_uri, phones, emails, addresses, raw_vcard, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16, now())
-     ON CONFLICT (uid) DO UPDATE SET
+     VALUES ($17,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16, now())
+     ON CONFLICT (addressbook_id, vcard_uid) DO UPDATE SET
        addressbook_id  = EXCLUDED.addressbook_id,
        href            = EXCLUDED.href,
        etag            = EXCLUDED.etag,
@@ -41,7 +41,7 @@ async function upsertContact(
        raw_vcard       = EXCLUDED.raw_vcard,
        updated_at      = now()
      WHERE contacts.addressbook_id = EXCLUDED.addressbook_id
-       AND (contacts.href IS NULL OR contacts.href = EXCLUDED.href)`,
+       AND (contacts.href IS NULL OR contacts.href = EXCLUDED.href OR contacts.href = $18)`,
     [
       parsed.uid,
       bookId,
@@ -59,6 +59,8 @@ async function upsertContact(
       JSON.stringify(parsed.emails),
       JSON.stringify(parsed.addresses),
       parsed.raw_vcard,
+      crypto.randomUUID(),
+      new URL(href).pathname,
     ]
   );
   return result.rowCount === 1;
@@ -196,7 +198,8 @@ async function runSyncUnlocked(force = false): Promise<{ synced: number; errors:
       const books = await client.fetchAddressBooks();
 
       for (const book of books) {
-        const bookId = book.url;
+        const [knownBook] = await query<{ id: string }>('SELECT id FROM addressbooks WHERE url = $1 AND carddav_account_id = $2', [book.url, account.id]);
+        const bookId = knownBook?.id ?? crypto.randomUUID();
         const displayName = (book.displayName as string | undefined) ?? book.url;
         const newCtag = (book as Record<string, unknown>).ctag as string | undefined ?? null;
 
@@ -217,6 +220,8 @@ async function runSyncUnlocked(force = false): Promise<{ synced: number; errors:
           [bookId, displayName, book.url, null, account.id]
         );
 
+        const [pending] = await query<{count:string}>("SELECT COUNT(*)::text AS count FROM contact_operations WHERE status NOT IN ('complete','cancelled') AND (plan->'source'->>'book'=$1 OR plan->'target'->>'book'=$1)",[bookId]);
+        if (Number(pending.count)>0) { errors++; continue; }
         const needsSync = force || !newCtag || !stored?.ctag || stored.ctag !== newCtag;
         if (!needsSync) {
           console.log(`[sync] ${displayName}: ctag unchanged, skipping`);

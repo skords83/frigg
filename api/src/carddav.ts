@@ -1,7 +1,7 @@
 import { createDAVClient } from 'tsdav';
 import VCF from 'vcf';
 import { projectDocument } from './vcardDocument';
-import { guardedDavFetch } from './davSafety';
+import { DavError, requireEtag, guardedDavFetch } from './davSafety';
 import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
 import { query } from './db';
 import { decryptSecret } from './crypto';
@@ -28,12 +28,27 @@ async function buildClient(account: CardDavAccountRow): Promise<DAVClientInstanc
     iv: account.password_iv,
     authTag: account.password_auth_tag,
   });
-  return createDAVClient({
+  const client = await createDAVClient({
     serverUrl: account.carddav_url,
     credentials: { username: account.username, password },
     authMethod: 'Basic',
     defaultAccountType: 'carddav',
     fetch: guardedDavFetch(),
+  });
+  // tsdav's multiget can return [] for a missing href. A direct GET preserves
+  // the exact status, complete body (including large photos), and response ETag.
+  return Object.assign(client, {
+    readVCard: async (url: string) => {
+      const response = await guardedDavFetch()(url, {
+        method: 'GET', redirect: 'error',
+        headers: { Authorization: `Basic ${Buffer.from(`${account.username}:${password}`).toString('base64')}` },
+      });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new DavError(response.status === 403 ? 403 : 503, 'resource_unavailable');
+      const etag = response.headers.get('etag');
+      requireEtag(etag);
+      return { raw: await response.text(), etag };
+    },
   });
 }
 

@@ -7,7 +7,7 @@ import type { AuthedRequest } from '../auth/middleware';
 import type { ContactRow } from '../types';
 
 import { DavError, requireEtag, resourceUrl } from '../davSafety';
-import { copyBeforeDelete } from '../moveContact';
+import { withDavLock } from '../davLock';
 import { readRemoteContact, publicEditContact } from '../remoteContact';
 import { patchDocument, projectDocument, type EditableFields } from '../vcardDocument';
 
@@ -84,7 +84,7 @@ router.get('/:uid/photo', async (req: AuthedRequest, res: Response) => {
 });
 
 // POST /api/contacts — create new contact
-router.post('/', async (req: AuthedRequest, res: Response) => {
+router.post('/', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const { addressbook_id, fn, given_name, family_name, org, title, birthday, note, emails, addresses } = req.body;
     const phones = withoutEmptyPhones(req.body.phones);
@@ -112,7 +112,7 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
     console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 // GET /api/contacts/:uid/edit — a fresh, authorized editing baseline.
 router.get('/:uid/edit', async (req: AuthedRequest, res: Response) => {
@@ -132,6 +132,7 @@ async function saveContact(req: AuthedRequest, res: Response, photoOnly = false)
   try {
     [stored] = await query<ContactRow>('SELECT * FROM contacts WHERE uid = $1', [req.params.uid]);
     if (!stored || !(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) return res.status(404).json({ error: 'not found' });
+    if ((await query("SELECT 1 FROM contact_operations WHERE status NOT IN ('complete','cancelled') AND (source_uid=$1 OR target_uid=$1)",[stored.uid])).length) throw new DavError(409,'operation_pending');
     const etag = req.headers['if-match'];
     requireEtag(etag);
     const latest = await readRemoteContact(stored);
@@ -154,7 +155,7 @@ async function saveContact(req: AuthedRequest, res: Response, photoOnly = false)
        parsed.birthday, parsed.note, JSON.stringify(parsed.phones), JSON.stringify(parsed.emails),
        JSON.stringify(parsed.addresses), raw, parsed.photo_data_uri, stored.uid]
     );
-    return res.json(publicEditContact({ ...latest.contact, ...parsed, etag: newEtag, has_photo: !!parsed.photo_data_uri }));
+    return res.json(publicEditContact({ ...latest.contact, ...parsed, uid: stored.uid, vcard_uid: parsed.uid, etag: newEtag, has_photo: !!parsed.photo_data_uri }));
   } catch (err) {
     if (err instanceof DavError && err.code === 'conflict' && stored) {
       try {
@@ -166,78 +167,14 @@ async function saveContact(req: AuthedRequest, res: Response, photoOnly = false)
     return res.status(503).json({ error: 'save_unconfirmed' });
   }
 }
-router.put('/:uid', (req: AuthedRequest, res: Response) => saveContact(req, res));
-router.patch('/:uid/photo', (req: AuthedRequest, res: Response) => saveContact(req, res, true));
+router.put('/:uid', withDavLock((req, res) => saveContact(req, res)));
+router.patch('/:uid/photo', withDavLock((req, res) => saveContact(req, res, true)));
 
-// PATCH /api/contacts/:uid/move — move to a different address book
-router.patch('/:uid/move', async (req: AuthedRequest, res: Response) => {
-  try {
-    const { uid } = req.params;
-    const { addressbook_id: newBookId } = req.body as { addressbook_id?: string };
-    if (!newBookId) return res.status(400).json({ error: 'addressbook_id required' });
-
-    const [stored] = await query<{ etag: string; addressbook_id: string; raw_vcard: string; href: string | null }>(
-      'SELECT etag, addressbook_id, raw_vcard, href FROM contacts WHERE uid = $1',
-      [uid]
-    );
-    if (!stored) return res.status(404).json({ error: 'not found' });
-
-    if (
-      !(await canAccessAddressbook(req.user!.id, stored.addressbook_id)) ||
-      !(await canAccessAddressbook(req.user!.id, newBookId))
-    ) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-
-    if (stored.addressbook_id === newBookId) {
-      const [current] = await query<ContactRow>(
-        `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-                birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
-         FROM contacts WHERE uid = $1`,
-        [uid]
-      );
-      return res.json(current);
-    }
-
-    const [[oldBook], [newBook]] = await Promise.all([
-      query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]),
-      query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [newBookId]),
-    ]);
-    if (!newBook) return res.status(404).json({ error: 'target address book not found' });
-
-    if (!oldBook) throw new DavError(409, 'sync_required');
-    requireEtag(req.headers['if-match']);
-    if (req.headers['if-match'] !== stored.etag) throw new DavError(409, 'conflict');
-    const moved = await copyBeforeDelete({
-      source: await getClientForAddressbook(stored.addressbook_id),
-      target: await getClientForAddressbook(newBookId),
-      sourceBook: oldBook.url, targetBook: newBook.url,
-      sourceUrl: resourceUrl(oldBook.url, stored.href),
-      uid, etag: stored.etag,
-      uidOf: (data) => parseVCard(data)?.uid ?? null,
-    });
-
-    await pool.query(
-      'UPDATE contacts SET addressbook_id = $1, etag = $2, href = $4, raw_vcard = $5, updated_at = now() WHERE uid = $3',
-      [newBookId, moved.etag, uid, moved.href, moved.raw]
-    );
-
-    const [updated] = await query<ContactRow>(
-      `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
-       FROM contacts WHERE uid = $1`,
-      [uid]
-    );
-    res.json(updated);
-  } catch (err) {
-    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
-    console.error('Contact operation failed');
-    res.status(500).json({ error: 'internal' });
-  }
-});
+// Legacy clients must use the preview/execute operation API to obtain resumability.
+router.patch('/:uid/move', (_req, res) => res.status(409).json({ error: 'operation_preview_required' }));
 
 // DELETE /api/contacts/:uid
-router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
+router.delete('/:uid', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const [stored] = await query<{ etag: string; addressbook_id: string; href: string | null }>(
       'SELECT etag, addressbook_id, href FROM contacts WHERE uid = $1',
@@ -248,6 +185,7 @@ router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
       return res.status(403).json({ error: 'forbidden' });
     }
 
+    if ((await query("SELECT 1 FROM contact_operations WHERE status NOT IN ('complete','cancelled') AND (source_uid=$1 OR target_uid=$1)",[req.params.uid])).length) throw new DavError(409,'operation_pending');
     const clientEtag = req.headers['if-match'];
     requireEtag(clientEtag);
     if (clientEtag && clientEtag !== stored.etag) {
@@ -269,6 +207,6 @@ router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
     console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 export default router;

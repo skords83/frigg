@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import type { Contact } from '@/types/contact';
 import { findDuplicates, type DuplicatePair } from './dedup';
 import { useModalClose } from './form-helpers';
+import { OperationReview, type OperationPreview } from './OperationReview';
 
 interface DedupModalProps {
   contacts: Contact[];
@@ -14,6 +15,7 @@ interface DedupModalProps {
 export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
   const pairs = useMemo(() => findDuplicates(contacts), [contacts]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [preview, setPreview] = useState<{operation:OperationPreview; discard:Contact}|null>(null);
   const [error, setError] = useState<string | null>(null);
   const [merging, setMerging] = useState<string | null>(null);
   const { closing, requestClose } = useModalClose(onClose);
@@ -26,8 +28,9 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
     setError(null);
     const [keep, discard] = keepA ? [pair.a, pair.b] : [pair.b, pair.a];
     try {
-      await onMerge(keep, discard);
-      setDismissed((prev) => new Set([...prev, key]));
+      const res=await fetch('/api/operations/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'merge',source_uid:discard.uid,target_uid:keep.uid})});
+      if(!res.ok) throw new Error('Zusammenführung nicht möglich: Kontakt wird bereits verwendet, enthält Gruppenreferenzen oder unvereinbare vCard-Daten. Beide Kontakte bleiben erhalten.');
+      setPreview({operation:await res.json(),discard});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Zusammenführen fehlgeschlagen.');
     } finally {
@@ -65,7 +68,9 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
 
         {/* List */}
         <div className="overflow-y-auto flex-1">
-          {visible.length === 0 ? (
+          {preview ? <OperationReview initial={preview.operation} onCancel={()=>setPreview(null)} onComplete={async(updated)=>{
+            await onMerge(updated,preview.discard);setPreview(null);
+          }}/> : visible.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <p className="text-[32px] mb-3">✓</p>
               <p className="text-muted text-[14px]">Keine Duplikate gefunden.</p>
@@ -99,7 +104,7 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
 
                   {/* Actions */}
                   <div className="flex gap-2 mt-3 items-center">
-                    <span className="text-[12px] text-muted mr-1">Behalten:</span>
+                    <span className="text-[12px] text-muted mr-1">Ziel auswählen:</span>
                     <button
                       onClick={() => handleMerge(pair, true)}
                       disabled={busy}

@@ -20,3 +20,11 @@ jobs:
       - run: npx tsc --noEmit --incremental false -p web/tsconfig.json
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, mbstring, xml
+      - run: bash tests/integration/download-baikal.sh "$RUNNER_TEMP/frigg-baikal-test"
+      - run: npm run test:baikal
+        env:
+          FRIGG_BAIKAL_RELEASE: ${{ runner.temp }}/frigg-baikal-test/baikal

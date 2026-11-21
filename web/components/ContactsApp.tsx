@@ -12,6 +12,7 @@ import { GroupEditorModal } from './GroupEditorModal';
 import { ManualGroupModal } from './ManualGroupModal';
 import { ExportImportModal } from './ExportImportModal';
 import { DedupModal } from './DedupModal';
+import { PendingOperations } from './PendingOperations';
 import { useSmartGroups, applySmartGroup } from './useSmartGroups';
 import { useGroups } from './useGroups';
 
@@ -119,24 +120,21 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
 
   async function moveContact(uid: string, targetBookId: string) {
     try {
-      const res = await fetch(`/api/contacts/${encodeURIComponent(uid)}/move`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'If-Match': contacts.find((c) => c.uid === uid)?.etag ?? '' },
-        body: JSON.stringify({ addressbook_id: targetBookId }),
-      });
-      if (!res.ok) {
-        window.alert('Verschieben nicht abgeschlossen. Bitte synchronisieren und beide Adressbücher prüfen. Eine bereits erstellte Zielkopie bleibt erhalten.');
-        return;
-      }
-      const updated: Contact = await res.json();
-      setContacts((prev) => prev.map((c) => (c.uid === uid ? updated : c)));
-    } catch {
-      window.alert('Verschieben nicht bestätigt. Bitte synchronisieren und beide Adressbücher prüfen.');
-    }
+      const preview=await fetch('/api/operations/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'move',source_uid:uid,target_book_id:targetBookId})});
+      if(!preview.ok) throw new Error();
+      const plan=await preview.json();
+      const res=await fetch(`/api/operations/${plan.id}/execute`,{method:'POST'});
+      if(!res.ok) throw new Error();
+      const result=await res.json();
+      setContacts(prev=>prev.map(c=>c.uid===uid?result.contact:c));
+      invalidateContacts().then(()=>router.refresh());
+    } catch {window.alert('Verschieben nicht abgeschlossen. Beide Adressbücher bleiben erhalten. Ein begonnener Vorgang kann über „Offene Vorgänge“ fortgesetzt werden.');}
   }
 
   async function mergeContacts(keep: Contact, discard: Contact) {
-    throw new Error('Zusammenführen ist bis zur verlustfreien Übernahme aller Felder gesperrt. Beide Kontakte bleiben erhalten.');
+    setContacts(prev=>prev.filter(c=>c.uid!==discard.uid).map(c=>c.uid===keep.uid?keep:c));
+    if(selectedUid===discard.uid)setSelectedUid(keep.uid);
+    invalidateContacts().then(()=>router.refresh());
   }
 
   async function handleSync() {
@@ -193,6 +191,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
           onClose={() => setShowExportImport(false)}
         />
       )}
+      <PendingOperations onComplete={()=>invalidateContacts().then(()=>router.refresh())}/>
       <Sidebar
         addressbooks={addressbooks}
         addressbookCounts={addressbookCounts}

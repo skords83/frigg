@@ -52,7 +52,8 @@ export function buildVCard(fields: ContactFields & { uid: string }): string {
 // resulting row.
 export async function createContact(addressbookId: string, fields: ContactFields, originalVCard?: string): Promise<ContactRow> {
   const uid = originalVCard ? projectDocument(originalVCard).uid : crypto.randomUUID();
-  if ((await query('SELECT 1 FROM contacts WHERE uid = $1', [uid])).length) throw new DavError(409, 'uid_exists');
+  if ((await query('SELECT 1 FROM contacts WHERE vcard_uid = $1 AND addressbook_id = $2', [uid, addressbookId])).length) throw new DavError(409, 'uid_exists');
+  const internalId = crypto.randomUUID();
   const phones = withoutEmptyPhones(fields.phones);
   const rawVcard = originalVCard ?? buildVCard({ ...fields, uid, phones });
   const parsed = projectDocument(rawVcard);
@@ -71,9 +72,9 @@ export async function createContact(addressbookId: string, fields: ContactFields
 
   await pool.query(
     `INSERT INTO contacts
-       (uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
+       (uid, vcard_uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
         birthday, note, photo_data_uri, phones, emails, addresses, raw_vcard)
-     VALUES ($1,$2,$15,$3,$4,$5,$6,$7,$8,$9,$10,$16,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
+     VALUES ($17,$1,$2,$15,$3,$4,$5,$6,$7,$8,$9,$10,$16,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
     [
       uid, addressbookId, etag,
       parsed.fn, parsed.given_name, parsed.family_name, parsed.org, parsed.title,
@@ -82,9 +83,10 @@ export async function createContact(addressbookId: string, fields: ContactFields
       rawVcard,
       new URL(`${encodeURIComponent(uid)}.vcf`, book.url).href,
       parsed.photo_data_uri,
+      internalId,
     ]
   );
 
-  const [created] = await query<ContactRow>('SELECT * FROM contacts WHERE uid = $1', [uid]);
+  const [created] = await query<ContactRow>('SELECT * FROM contacts WHERE uid = $1', [internalId]);
   return created;
 }

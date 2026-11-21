@@ -271,7 +271,7 @@ function formatBirthday(raw: string): string {
     ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`
     : raw;
   // Handles YYYY-MM-DD or --MM-DD (vCard 4.0 partial dates)
-  const match = normalized.match(/^(?:\d{4}|--)[-–](\d{2})[-–](\d{2})$/);
+  const match = normalized.match(/^(?:\d{4}[-–]|--)(\d{2})[-–]?(\d{2})$/);
   if (!match) return raw;
   const months = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
   const month = months[parseInt(match[1], 10) - 1] ?? match[1];
