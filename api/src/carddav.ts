@@ -1,5 +1,6 @@
 import { createDAVClient } from 'tsdav';
 import VCF from 'vcf';
+import { guardedDavFetch } from './davSafety';
 import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
 import { query } from './db';
 import { decryptSecret } from './crypto';
@@ -31,6 +32,7 @@ async function buildClient(account: CardDavAccountRow): Promise<DAVClientInstanc
     credentials: { username: account.username, password },
     authMethod: 'Basic',
     defaultAccountType: 'carddav',
+    fetch: guardedDavFetch(),
   });
 }
 
@@ -114,7 +116,8 @@ export function parseVCard(raw: string): ParsedCard | null {
       return (Array.isArray(p) ? p[0] : p).valueOf() ?? null;
     }
 
-    const uid = getStr('uid') ?? crypto.randomUUID();
+    const uid = getStr('uid');
+    if (!uid) return null;
     const fn = getStr('fn') ?? '';
 
     // N: family;given;additional;prefix;suffix
@@ -204,7 +207,7 @@ export function parseVCard(raw: string): ParsedCard | null {
       photo_data_uri, phones, emails, addresses, raw_vcard: raw,
     };
   } catch (err) {
-    console.error('vCard parse error', err);
+    console.error('vCard could not be parsed');
     return null;
   }
 }

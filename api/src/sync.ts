@@ -13,16 +13,12 @@ async function upsertContact(
   href: string,
   etag: string,
   data: string,
-  force = false,
 ): Promise<boolean> {
   const parsed = parseVCard(data);
   if (!parsed) return false;
 
-  const whereClause = force
-    ? ''
-    : 'WHERE contacts.etag IS DISTINCT FROM EXCLUDED.etag OR contacts.href IS DISTINCT FROM EXCLUDED.href';
-
-  await pool.query(
+  // Until resource identities are migrated, fail closed on cross-book UID collisions.
+  const result = await pool.query(
     `INSERT INTO contacts
        (uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
         birthday, note, photo_data_uri, phones, emails, addresses, raw_vcard, updated_at)
@@ -44,7 +40,8 @@ async function upsertContact(
        addresses       = EXCLUDED.addresses,
        raw_vcard       = EXCLUDED.raw_vcard,
        updated_at      = now()
-     ${whereClause}`,
+     WHERE contacts.addressbook_id = EXCLUDED.addressbook_id
+       AND (contacts.href IS NULL OR contacts.href = EXCLUDED.href)`,
     [
       parsed.uid,
       bookId,
@@ -64,10 +61,10 @@ async function upsertContact(
       parsed.raw_vcard,
     ]
   );
-  return true;
+  return result.rowCount === 1;
 }
 
-async function fullSync(
+export async function fullSync(
   client: DAVClient,
   book: DAVBook,
   bookId: string,
@@ -82,9 +79,11 @@ async function fullSync(
   const serverHrefs = new Set<string>();
 
   for (const card of vCards) {
-    const href = card.url ?? '';
-    const ok = await upsertContact(bookId, href, card.etag ?? '', card.data ?? '', force);
-    if (ok) { serverHrefs.add(href); synced++; }
+    const href = card.url ? new URL(card.url, book.url).href : '';
+    if (!href || !card.data) { errors++; continue; }
+    serverHrefs.add(href);
+    const ok = await upsertContact(bookId, href, card.etag ?? '', card.data ?? '');
+    if (ok) synced++;
     else errors++;
   }
 
@@ -93,11 +92,11 @@ async function fullSync(
     'SELECT uid, href FROM contacts WHERE addressbook_id = $1',
     [bookId]
   );
-  const toDelete = existing
-    .filter((r) => r.href === null || !serverHrefs.has(r.href))
+  const toDelete = (errors ? [] : existing)
+    .filter((r) => r.href !== null && !serverHrefs.has(new URL(r.href, book.url).href))
     .map((r) => r.uid);
   if (toDelete.length) {
-    await pool.query('DELETE FROM contacts WHERE uid = ANY($1::text[])', [toDelete]);
+    await pool.query('DELETE FROM contacts WHERE uid = ANY($1::text[]) AND addressbook_id = $2', [toDelete, bookId]);
     console.log(`[sync] ${displayName}: removed ${toDelete.length} stale contacts`);
   }
 
@@ -105,7 +104,7 @@ async function fullSync(
   return { synced, errors, syncToken };
 }
 
-async function deltaSync(
+export async function deltaSync(
   client: DAVClient,
   book: DAVBook,
   bookId: string,
@@ -128,17 +127,19 @@ async function deltaSync(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const newSyncToken: string | null =
     (responses[0] as any)?.raw?.multistatus?.syncToken ??
-    (book as Record<string, unknown>).syncToken as string | null ??
     null;
+  if (!newSyncToken || responses.some((r) => ![200, 201, 204, 207, 404].includes(r.status))) {
+    throw new Error('Invalid sync response');
+  }
 
   const vcfResponses = responses.filter(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (r: any) => (r.href as string | undefined)?.endsWith('.vcf')
+    (r: any) => typeof r.href === 'string' && new URL(r.href, book.url).href !== new URL(book.url).href
   );
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const changedHrefs = vcfResponses.filter((r: any) => r.status !== 404).map((r: any) => r.href as string);
+  const changedHrefs = vcfResponses.filter((r: any) => r.status !== 404).map((r: any) => new URL(r.href, book.url).href);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const deletedHrefs = vcfResponses.filter((r: any) => r.status === 404).map((r: any) => r.href as string);
+  const deletedHrefs = vcfResponses.filter((r: any) => r.status === 404).map((r: any) => new URL(r.href, book.url).href);
 
   console.log(`[sync] ${displayName}: ${changedHrefs.length} changed, ${deletedHrefs.length} deleted`);
 
@@ -151,13 +152,15 @@ async function deltaSync(
       depth: '1',
     });
 
+    const returned = new Set(multigetResults.map((r: DAVClient) => r.href ? new URL(r.href, book.url).href : ''));
+    if (returned.size !== changedHrefs.length || changedHrefs.some((href: string) => !returned.has(href))) errors++;
     for (const res of multigetResults) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const r = res as any;
-      const href: string = r.href ?? '';
+      const href: string = r.href ? new URL(r.href, book.url).href : '';
       const etag: string = r.props?.getetag ?? '';
       const data: string = r.props?.addressData?._cdata ?? r.props?.addressData ?? '';
-      if (!data) { errors++; continue; }
+      if (!data || !href || r.status >= 400) { errors++; continue; }
 
       const ok = await upsertContact(bookId, href, etag, data);
       if (ok) synced++; else errors++;
@@ -165,7 +168,7 @@ async function deltaSync(
   }
 
   // Delete contacts by href
-  if (deletedHrefs.length > 0) {
+  if (errors === 0 && deletedHrefs.length > 0) {
     await pool.query(
       'DELETE FROM contacts WHERE href = ANY($1::text[]) AND addressbook_id = $2',
       [deletedHrefs, bookId]
@@ -176,7 +179,7 @@ async function deltaSync(
   return { synced, errors, syncToken: newSyncToken };
 }
 
-export async function runSync(force = false): Promise<{ synced: number; errors: number }> {
+async function runSyncUnlocked(force = false): Promise<{ synced: number; errors: number }> {
   console.log(`[sync] Starting sync${force ? ' (forced re-parse of all contacts)' : ''} …`);
   let synced = 0;
   let errors = 0;
@@ -209,13 +212,12 @@ export async function runSync(force = false): Promise<{ synced: number; errors: 
            VALUES ($1, $2, $3, $4, $5, now())
            ON CONFLICT (id) DO UPDATE
              SET display_name = EXCLUDED.display_name,
-                 ctag         = EXCLUDED.ctag,
                  carddav_account_id = EXCLUDED.carddav_account_id,
                  updated_at   = now()`,
-          [bookId, displayName, book.url, newCtag, account.id]
+          [bookId, displayName, book.url, null, account.id]
         );
 
-        const needsSync = force || !stored?.ctag || stored.ctag !== newCtag;
+        const needsSync = force || !newCtag || !stored?.ctag || stored.ctag !== newCtag;
         if (!needsSync) {
           console.log(`[sync] ${displayName}: ctag unchanged, skipping`);
           continue;
@@ -234,7 +236,7 @@ export async function runSync(force = false): Promise<{ synced: number; errors: 
             result = await deltaSync(client, book, bookId, displayName, stored.sync_token);
           } catch (err) {
             // Server rejected the sync-token (expired / invalid) → fall back to full sync
-            console.warn(`[sync] ${displayName}: delta sync failed (${(err as Error).message}), falling back to full sync`);
+            console.warn('[sync] Delta sync failed; falling back to full sync');
             result = await fullSync(client, book, bookId, displayName);
           }
         } else {
@@ -245,21 +247,41 @@ export async function runSync(force = false): Promise<{ synced: number; errors: 
         errors += result.errors;
 
         // Persist the new sync-token from the server
-        await pool.query(
-          'UPDATE addressbooks SET sync_token = $1, updated_at = now() WHERE id = $2',
-          [result.syncToken, bookId]
+        if (result.errors === 0) await pool.query(
+          'UPDATE addressbooks SET sync_token = $1, ctag = $3, updated_at = now() WHERE id = $2',
+          [result.syncToken, bookId, newCtag]
         );
       }
     } catch (err) {
       // One account's failure (e.g. wrong/expired Baïkal password) shouldn't stop
       // the others from syncing.
-      console.error(`[sync] Fatal error for carddav_account ${account.id}`, err);
+      console.error('[sync] Account synchronization failed');
       errors++;
     }
   }
 
   console.log(`[sync] Done — synced: ${synced}, errors: ${errors}`);
   return { synced, errors };
+}
+
+// Dedicated connection holds the lock across all queries and remote requests.
+export async function runSync(force = false): Promise<{ synced: number; errors: number }> {
+  const connection = await pool.connect();
+  let locked = false;
+  try {
+    const result = await connection.query('SELECT pg_try_advisory_lock(186702, 1) AS locked');
+    locked = result.rows[0].locked;
+    if (!locked) return { synced: 0, errors: 0 };
+    return await runSyncUnlocked(force);
+  } finally {
+    try {
+      if (locked) await connection.query('SELECT pg_advisory_unlock(186702, 1)');
+    } catch (err) {
+      connection.release(true);
+      throw err;
+    }
+    connection.release();
+  }
 }
 
 export function startSyncSchedule(): void {

@@ -14,6 +14,7 @@ interface DedupModalProps {
 export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
   const pairs = useMemo(() => findDuplicates(contacts), [contacts]);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
   const [merging, setMerging] = useState<string | null>(null);
   const { closing, requestClose } = useModalClose(onClose);
 
@@ -22,10 +23,13 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
   async function handleMerge(pair: DuplicatePair, keepA: boolean) {
     const key = pairKey(pair);
     setMerging(key);
+    setError(null);
     const [keep, discard] = keepA ? [pair.a, pair.b] : [pair.b, pair.a];
     try {
       await onMerge(keep, discard);
       setDismissed((prev) => new Set([...prev, key]));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Zusammenführen fehlgeschlagen.');
     } finally {
       setMerging(null);
     }
@@ -56,6 +60,8 @@ export function DedupModal({ contacts, onMerge, onClose }: DedupModalProps) {
             className="press text-muted hover:text-foreground w-7 h-7 flex items-center justify-center rounded-full hover:bg-divider"
           >✕</button>
         </div>
+
+        {error && <p role="alert" className="px-6 py-3 text-[13px] text-muted">{error}</p>}
 
         {/* List */}
         <div className="overflow-y-auto flex-1">

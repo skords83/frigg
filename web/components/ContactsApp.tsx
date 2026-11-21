@@ -121,22 +121,22 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
     try {
       const res = await fetch(`/api/contacts/${encodeURIComponent(uid)}/move`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'If-Match': contacts.find((c) => c.uid === uid)?.etag ?? '' },
         body: JSON.stringify({ addressbook_id: targetBookId }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        window.alert('Verschieben nicht abgeschlossen. Bitte synchronisieren und beide Adressbücher prüfen. Eine bereits erstellte Zielkopie bleibt erhalten.');
+        return;
+      }
       const updated: Contact = await res.json();
       setContacts((prev) => prev.map((c) => (c.uid === uid ? updated : c)));
     } catch {
-      // ignore
+      window.alert('Verschieben nicht bestätigt. Bitte synchronisieren und beide Adressbücher prüfen.');
     }
   }
 
   async function mergeContacts(keep: Contact, discard: Contact) {
-    await fetch(`/api/contacts/${encodeURIComponent(discard.uid)}`, { method: 'DELETE' });
-    setContacts((prev) => prev.filter((c) => c.uid !== discard.uid));
-    if (selectedUid === discard.uid) setSelectedUid(keep.uid);
-    invalidateContacts().then(() => router.refresh());
+    throw new Error('Zusammenführen ist bis zur verlustfreien Übernahme aller Felder gesperrt. Beide Kontakte bleiben erhalten.');
   }
 
   async function handleSync() {

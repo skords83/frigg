@@ -6,6 +6,9 @@ import { hasInvalidEmail, hasInvalidPhone, isInvalidBirthday, withoutEmptyPhones
 import type { AuthedRequest } from '../auth/middleware';
 import type { ContactRow } from '../types';
 
+import { DavError, requireEtag, resourceUrl } from '../davSafety';
+import { copyBeforeDelete } from '../moveContact';
+
 const router = Router();
 
 // GET /api/contacts
@@ -22,7 +25,8 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
     );
     res.json(contacts);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -42,7 +46,8 @@ router.get('/:uid', async (req: AuthedRequest, res: Response) => {
     }
     res.json(contact);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -70,7 +75,8 @@ router.get('/:uid/photo', async (req: AuthedRequest, res: Response) => {
     res.setHeader('ETag', etag);
     res.send(Buffer.from(base64, 'base64'));
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -100,7 +106,8 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
     });
     res.status(201).json(created);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -108,8 +115,8 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
 // PUT /api/contacts/:uid — update existing contact
 router.put('/:uid', async (req: AuthedRequest, res: Response) => {
   try {
-    const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string }>(
-      'SELECT etag, raw_vcard, addressbook_id FROM contacts WHERE uid = $1',
+    const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string; href: string | null }>(
+      'SELECT etag, raw_vcard, addressbook_id, href FROM contacts WHERE uid = $1',
       [req.params.uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
@@ -119,6 +126,7 @@ router.put('/:uid', async (req: AuthedRequest, res: Response) => {
 
     // ETag conflict check
     const clientEtag = req.headers['if-match'];
+    requireEtag(clientEtag);
     if (clientEtag && clientEtag !== stored.etag) {
       return res.status(409).json({ error: 'conflict', serverEtag: stored.etag });
     }
@@ -176,13 +184,13 @@ router.put('/:uid', async (req: AuthedRequest, res: Response) => {
     if (!book) return res.status(500).json({ error: 'address book not found' });
     const client = await getClientForAddressbook(stored.addressbook_id);
 
-    const vcardUrl = `${book.url}${req.params.uid}.vcf`;
+    const vcardUrl = resourceUrl(book.url, stored.href);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateResult: any = await client.updateVCard({
       vCard: { url: vcardUrl, data: newRawVcard, etag: stored.etag },
     });
     // tsdav returns a raw Fetch Response; the ETag is in the response headers
-    const newEtag: string = updateResult?.headers?.get?.('etag') ?? updateResult?.etag ?? stored.etag;
+    const newEtag: string = updateResult?.headers?.get?.('etag') ?? '';
 
     // Rebuild the parsed data from the new raw vCard
     const parsed = parseVCard(newRawVcard);
@@ -218,7 +226,8 @@ router.put('/:uid', async (req: AuthedRequest, res: Response) => {
     );
     res.json(updated);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -226,14 +235,17 @@ router.put('/:uid', async (req: AuthedRequest, res: Response) => {
 // PATCH /api/contacts/:uid/photo
 router.patch('/:uid/photo', async (req: AuthedRequest, res: Response) => {
   try {
-    const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string }>(
-      'SELECT etag, raw_vcard, addressbook_id FROM contacts WHERE uid = $1',
+    const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string; href: string | null }>(
+      'SELECT etag, raw_vcard, addressbook_id, href FROM contacts WHERE uid = $1',
       [req.params.uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
     if (!(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) {
       return res.status(403).json({ error: 'forbidden' });
     }
+
+    requireEtag(req.headers['if-match']);
+    if (req.headers['if-match'] !== stored.etag) return res.status(409).json({ error: 'conflict' });
 
     const { photo_data_uri } = req.body as { photo_data_uri?: string | null };
     const removing = photo_data_uri === null || photo_data_uri === '';
@@ -249,12 +261,12 @@ router.patch('/:uid/photo', async (req: AuthedRequest, res: Response) => {
     if (!book) return res.status(500).json({ error: 'address book not found' });
     const client = await getClientForAddressbook(stored.addressbook_id);
 
-    const vcardUrl = `${book.url}${req.params.uid}.vcf`;
+    const vcardUrl = resourceUrl(book.url, stored.href);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateResult: any = await client.updateVCard({
       vCard: { url: vcardUrl, data: newRawVcard, etag: stored.etag },
     });
-    const newEtag: string = updateResult?.headers?.get?.('etag') ?? updateResult?.etag ?? stored.etag;
+    const newEtag: string = updateResult?.headers?.get?.('etag') ?? '';
 
     await pool.query(
       `UPDATE contacts SET etag = $1, photo_data_uri = $2, raw_vcard = $3, updated_at = now() WHERE uid = $4`,
@@ -269,7 +281,8 @@ router.patch('/:uid/photo', async (req: AuthedRequest, res: Response) => {
     );
     res.json(updated);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -281,8 +294,8 @@ router.patch('/:uid/move', async (req: AuthedRequest, res: Response) => {
     const { addressbook_id: newBookId } = req.body as { addressbook_id?: string };
     if (!newBookId) return res.status(400).json({ error: 'addressbook_id required' });
 
-    const [stored] = await query<{ etag: string; addressbook_id: string; raw_vcard: string }>(
-      'SELECT etag, addressbook_id, raw_vcard FROM contacts WHERE uid = $1',
+    const [stored] = await query<{ etag: string; addressbook_id: string; raw_vcard: string; href: string | null }>(
+      'SELECT etag, addressbook_id, raw_vcard, href FROM contacts WHERE uid = $1',
       [uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
@@ -310,26 +323,21 @@ router.patch('/:uid/move', async (req: AuthedRequest, res: Response) => {
     ]);
     if (!newBook) return res.status(404).json({ error: 'target address book not found' });
 
-    // Source and destination books may belong to different CardDAV accounts
-    // (e.g. moving a contact into a book shared by another Frigg user), so
-    // each needs its own client resolved independently.
-    if (oldBook) {
-      const oldClient = await getClientForAddressbook(stored.addressbook_id);
-      await oldClient.deleteVCard({ vCard: { url: `${oldBook.url}${uid}.vcf`, etag: stored.etag } as never });
-    }
-
-    const newClient = await getClientForAddressbook(newBookId);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const createResult: any = await newClient.createVCard({
-      addressBook: { url: newBook.url },
-      filename: `${uid}.vcf`,
-      vCardString: stored.raw_vcard,
+    if (!oldBook) throw new DavError(409, 'sync_required');
+    requireEtag(req.headers['if-match']);
+    if (req.headers['if-match'] !== stored.etag) throw new DavError(409, 'conflict');
+    const moved = await copyBeforeDelete({
+      source: await getClientForAddressbook(stored.addressbook_id),
+      target: await getClientForAddressbook(newBookId),
+      sourceBook: oldBook.url, targetBook: newBook.url,
+      sourceUrl: resourceUrl(oldBook.url, stored.href),
+      uid, etag: stored.etag,
+      uidOf: (data) => parseVCard(data)?.uid ?? null,
     });
-    const newEtag: string = createResult?.etag ?? stored.etag;
 
     await pool.query(
-      'UPDATE contacts SET addressbook_id = $1, etag = $2, updated_at = now() WHERE uid = $3',
-      [newBookId, newEtag, uid]
+      'UPDATE contacts SET addressbook_id = $1, etag = $2, href = $4, raw_vcard = $5, updated_at = now() WHERE uid = $3',
+      [newBookId, moved.etag, uid, moved.href, moved.raw]
     );
 
     const [updated] = await query<ContactRow>(
@@ -340,7 +348,8 @@ router.patch('/:uid/move', async (req: AuthedRequest, res: Response) => {
     );
     res.json(updated);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -348,8 +357,8 @@ router.patch('/:uid/move', async (req: AuthedRequest, res: Response) => {
 // DELETE /api/contacts/:uid
 router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
   try {
-    const [stored] = await query<{ etag: string; addressbook_id: string }>(
-      'SELECT etag, addressbook_id FROM contacts WHERE uid = $1',
+    const [stored] = await query<{ etag: string; addressbook_id: string; href: string | null }>(
+      'SELECT etag, addressbook_id, href FROM contacts WHERE uid = $1',
       [req.params.uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
@@ -358,21 +367,24 @@ router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
     }
 
     const clientEtag = req.headers['if-match'];
+    requireEtag(clientEtag);
     if (clientEtag && clientEtag !== stored.etag) {
       return res.status(409).json({ error: 'conflict', serverEtag: stored.etag });
     }
 
     const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
     const client = await getClientForAddressbook(stored.addressbook_id);
+    if (!book) throw new DavError(409, 'sync_required');
     if (book) {
-      const vcardUrl = `${book.url}${req.params.uid}.vcf`;
+      const vcardUrl = resourceUrl(book.url, stored.href);
       await client.deleteVCard({ vCard: { url: vcardUrl, etag: stored.etag } as never });
     }
 
     await pool.query('DELETE FROM contacts WHERE uid = $1', [req.params.uid]);
     res.status(204).end();
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });

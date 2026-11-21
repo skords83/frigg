@@ -60,7 +60,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
       if (photoPreview) {
         const photoRes = await fetch(`/api/contacts/${contact.uid}/photo`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'If-Match': currentContact.etag },
           body: JSON.stringify({
             photo_data_uri: photoPreview === 'remove' ? null : photoPreview,
           }),

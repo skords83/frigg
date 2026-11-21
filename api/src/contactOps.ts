@@ -96,13 +96,13 @@ export async function createContact(addressbookId: string, fields: ContactFields
     filename: `${uid}.vcf`,
     vCardString: rawVcard,
   });
-  const etag = (result?.etag as string | undefined) ?? '';
+  const etag = result.headers.get('etag') ?? '';
 
   await pool.query(
     `INSERT INTO contacts
-       (uid, addressbook_id, etag, fn, given_name, family_name, org, title,
+       (uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
         birthday, note, photo_data_uri, phones, emails, addresses, raw_vcard)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULL,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
+     VALUES ($1,$2,$15,$3,$4,$5,$6,$7,$8,$9,$10,NULL,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
     [
       uid, addressbookId, etag,
       fields.fn ?? `${fields.given_name ?? ''} ${fields.family_name ?? ''}`.trim(),
@@ -112,6 +112,7 @@ export async function createContact(addressbookId: string, fields: ContactFields
       JSON.stringify(fields.emails ?? []),
       JSON.stringify(fields.addresses ?? []),
       rawVcard,
+      new URL(`${uid}.vcf`, book.url).href,
     ]
   );
 
