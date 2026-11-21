@@ -251,3 +251,58 @@ SQL-Down-Skript, das neu entstandene Kontakte oder Journale verwirft. Bei einem
 Teilvorgang erst Journal und beide Serverressourcen vergleichen; niemals die
 Zielkopie automatisch löschen. Der vorhandene globale href-Index bleibt bestehen;
 mehrfach verbundene identische Serverressourcen werden konservativ blockiert.
+
+## PR 4: synchronisierte Gruppen und native Serverrepräsentation
+
+Migration 006 ergänzt `resource_kind` und setzt Sync-Marker zurück, damit bestehende
+Gruppenressourcen neu klassifiziert werden. Kontakte und lokale Mitgliedschaften
+bleiben erhalten. Keine lokale Gruppe wird umgewandelt. API/Web gemeinsam nach
+005 und 006 starten; Backup-/Wiederherstellungsregeln aus PR 3 gelten weiterhin.
+
+Gruppen besitzen getrennte, authentifizierte Endpunkte und eine sichtbare Kennzeichnung.
+Unterstützt werden vCard 4 KIND/MEMBER und vCard 3 mit Apple-X-Eigenschaften.
+Capabilities und Schreibprivilegien werden vor Anlage geprüft. Mitglieder müssen
+im selben Buch existieren; doppelte Zuordnungen erzeugen keine neuen Einträge.
+Unbekannte Referenzen bleiben erhalten. Gemischte/unbekannte Gruppenformate sind
+schreibgeschützt. Umbenennen, Mitgliedschaft und Löschen benötigen starke ETags;
+eine zwischenzeitliche Änderung liefert 409 und die aktuelle Gruppe.
+
+**Korrektur des PR-3-Lesewegs:** Baïkal/sabre konvertiert GET sowie Multiget ohne
+Versionsangabe zu vCard 3, bei unverändertem Ressourcen-ETag. Deshalb liest Frigg
+jetzt die native `address-data`-Eigenschaft per PROPFIND (Tiefe 0), auch beim Sync.
+Dieser von Baïkal unterstützte Zugriff ist eine Servererweiterung, keine universelle
+CardDAV-Garantie. Fehlt sie, wird sicher abgebrochen (`native_vcard_unavailable`);
+kein Rückfall auf eine möglicherweise verlustbehaftete Konvertierung. Zusätzliche
+Leseanfragen erhöhen die Dauer großer Synchronisationen. Eine spätere Optimierung
+muss denselben Erhalt der Originalrepräsentation nachweisen.
+
+Referenzen auf Move-/Merge-Quellen werden vor Vorschau und unmittelbar vor dem
+bedingten Löschen erneut aus nativen Serverdaten geprüft. Zwischen verschiedenen
+Ressourcen kann CardDAV keine atomare Transaktion garantieren; ein externer Client
+kann danach weiterhin eine Referenz anlegen. Journale behalten die Originaldaten.
+
+### DAVx⁵-Nachweis und Grenzen
+
+Am 21.11.2026 geprüfte Primärquellen:
+
+- [Baïkal-Konfiguration](https://www.davx5.com/tested-with/baikal): separate vCards.
+- [Technische Dokumentation](https://manual.davx5.com/technical_information.html):
+  vCard-4-Gruppen und Apple-Eigenschaften für vCard 3.
+- [Android-Gruppenunterstützung](https://www.davx5.com/faq/cant-manage-groups-on-device):
+  CATEGORIES und separate vCards sind unterschiedliche Methoden; die Darstellung
+  und Bearbeitung hängen zusätzlich von der Android-Kontakte-App ab.
+
+Frigg verwendet separate vCards, keine automatische CATEGORIES-Konvertierung.
+Der echte Baïkal-Test prüft beide Formate, Anlage, Hinzufügen/Entfernen, doppelte und
+fehlende Mitglieder, externes Umbenennen, ETag-Konflikt, Full-/Delta-Sync und Löschung.
+Lokale Gruppen bleiben im selben Test erhalten. Ungültige Sync-Tokens lösen einen
+vollständigen Neuabgleich aus. Unit-Tests prüfen unbekannte Formate und Referenzen.
+Browser-Tests prüfen Gruppenanlage bei Desktop- und mobiler Dialoggröße sowie die
+Sperre bei fehlender Serverunterstützung.
+
+**Offen:** Es wurde kein Android-Gerät/Emulator mit DAVx⁵ und konkreter Kontakte-App
+betrieben. Protokolltests plus Herstellerdokumentation ersetzen diesen Ende-zu-Ende-
+Nachweis nicht. Vor Freigabe sind mindestens Download/Upload einer Gruppe, externer
+Rename, Mitgliedschaft und Löschung mit der vorgesehenen DAVx⁵-/Android-Konfiguration
+an synthetischen Kontakten zu prüfen. Ebenso offen: nativer PostgreSQL-Mehrprozess-
+Lasttest, weitere CardDAV-Server und vollständige mobile Navigation (bisher Dialogtests).

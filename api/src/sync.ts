@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { getClientForAccount, parseVCard } from './carddav';
 import { query, pool } from './db';
 import type { AddressBookRow } from './types';
+import { readGroup } from './groupCard';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DAVBook = any;
@@ -20,12 +21,13 @@ async function upsertContact(
   // Preserve internal IDs and local memberships while scoping remote UIDs to a book.
   const result = await pool.query(
     `INSERT INTO contacts
-       (uid, vcard_uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
+       (uid, vcard_uid, resource_kind, addressbook_id, href, etag, fn, given_name, family_name, org, title,
         birthday, note, photo_data_uri, phones, emails, addresses, raw_vcard, updated_at)
-     VALUES ($17,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16, now())
+     VALUES ($17,$1,$19,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::jsonb,$15::jsonb,$16, now())
      ON CONFLICT (addressbook_id, vcard_uid) DO UPDATE SET
        addressbook_id  = EXCLUDED.addressbook_id,
        href            = EXCLUDED.href,
+       resource_kind   = EXCLUDED.resource_kind,
        etag            = EXCLUDED.etag,
        fn              = EXCLUDED.fn,
        given_name      = EXCLUDED.given_name,
@@ -61,6 +63,7 @@ async function upsertContact(
       parsed.raw_vcard,
       crypto.randomUUID(),
       new URL(href).pathname,
+      readGroup(data) ? 'group' : 'contact',
     ]
   );
   return result.rowCount === 1;
@@ -84,7 +87,9 @@ export async function fullSync(
     const href = card.url ? new URL(card.url, book.url).href : '';
     if (!href || !card.data) { errors++; continue; }
     serverHrefs.add(href);
-    const ok = await upsertContact(bookId, href, card.etag ?? '', card.data ?? '');
+    const native = await client.readVCard(href);
+    if (!native) { errors++; continue; }
+    const ok = await upsertContact(bookId, href, native.etag, native.raw);
     if (ok) synced++;
     else errors++;
   }
@@ -160,11 +165,12 @@ export async function deltaSync(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const r = res as any;
       const href: string = r.href ? new URL(r.href, book.url).href : '';
-      const etag: string = r.props?.getetag ?? '';
       const data: string = r.props?.addressData?._cdata ?? r.props?.addressData ?? '';
       if (!data || !href || r.status >= 400) { errors++; continue; }
 
-      const ok = await upsertContact(bookId, href, etag, data);
+      const native = await client.readVCard(href);
+      if (!native) { errors++; continue; }
+      const ok = await upsertContact(bookId, href, native.etag, native.raw);
       if (ok) synced++; else errors++;
     }
   }

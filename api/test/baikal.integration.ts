@@ -14,6 +14,9 @@ import { encryptSecret } from '../src/crypto';
 import { requireAuth,requireActive } from '../src/auth/middleware';
 import contactsRouter from '../src/routes/contacts';
 import operationsRouter from '../src/routes/operations';
+import carddavGroupsRouter from '../src/routes/carddav-groups';
+import groupsRouter from '../src/routes/groups';
+import {patchGroup,readGroup} from '../src/groupCard';
 import { runSync } from '../src/sync';
 import { getClientForAccount } from '../src/carddav';
 import { buildVCard } from '../src/contactOps';
@@ -52,7 +55,7 @@ test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move,
     assert.notEqual(stored[0].uid,stored[1].uid);
     const contact=stored.find(c=>c.href.endsWith('arbitrary-name'))!;
     const localBooks=(await db.query<{id:string;url:string}>('SELECT id,url FROM addressbooks')).rows;
-    const app=express();app.use(express.json());app.use(cookieParser());app.use('/api/contacts',requireAuth,requireActive,contactsRouter);app.use('/api/operations',requireAuth,requireActive,operationsRouter);
+    const app=express();app.use(express.json());app.use(cookieParser());app.use('/api/contacts',requireAuth,requireActive,contactsRouter);app.use('/api/operations',requireAuth,requireActive,operationsRouter);app.use('/api/carddav-groups',requireAuth,requireActive,carddavGroupsRouter);app.use('/api/groups',requireAuth,requireActive,groupsRouter);
     server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server!.once('listening',r));
     const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
     const call=(path:string,method='GET',body?:unknown,etag?:string)=>fetch(base+path,{method,headers:{Cookie:'frigg_sid=test-session','Content-Type':'application/json',...(etag?{'If-Match':etag}:{})},body:body?JSON.stringify(body):undefined});
@@ -80,6 +83,28 @@ test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move,
     const move=await(await call('/api/operations/preview','POST',{kind:'move',source_uid:movable.uid,target_book_id:localBooks.find(b=>b.url===bookB.url)!.id})).json();
     const moved=await call(`/api/operations/${move.id}/execute`,'POST');assert.equal(moved.status,200,await moved.clone().text());const final=(await moved.json()).contact;assert.equal(final.uid,movable.uid);assert.equal(final.addressbook_id,localBooks.find(b=>b.url===bookB.url)!.id);
     assert.equal((await call(`/api/contacts/${final.uid}`,'DELETE',undefined,final.etag)).status,204);
+    assert.equal((await runSync()).errors,0);
+    const member=await(await call('/api/contacts','POST',{addressbook_id:contact.addressbook_id,fn:'Group member'})).json();
+    const capabilities=await(await call(`/api/carddav-groups/capabilities?addressbook_id=${encodeURIComponent(contact.addressbook_id)}`)).json();
+    assert.deepEqual(capabilities.formats.sort(),['apple','vcard4']);
+    for(const format of ['vcard4','apple']) {
+      const create=await call('/api/carddav-groups','POST',{addressbook_id:contact.addressbook_id,name:`Group ${format}`,format});
+      assert.equal(create.status,201,await create.clone().text());let group=await create.json();
+      const add=await call(`/api/carddav-groups/${group.id}/members`,'POST',{contact_uid:member.uid},group.etag);assert.equal(add.status,200,await add.clone().text());group=await add.json();assert.deepEqual(group.member_uids,[member.uid]);
+      const again=await call(`/api/carddav-groups/${group.id}/members`,'POST',{contact_uid:member.uid},group.etag);assert.equal(again.status,200);group=await again.json();assert.equal(group.member_uids.length,1);
+      const internal=group.id.replace('dav:','');const row=(await db.query<{href:string}>('SELECT href FROM contacts WHERE uid=$1',[internal])).rows[0];
+      const externalGroup=await client.readVCard(row.href);
+      await client.updateVCard({vCard:{url:row.href,etag:externalGroup.etag,data:patchGroup(externalGroup.raw,{name:'Second client'})}});
+      const conflictGroup=await call(`/api/carddav-groups/${group.id}`,'PATCH',{name:'Stale rename'},group.etag);assert.equal(conflictGroup.status,409);group=(await conflictGroup.json()).server;assert.equal(group.name,'Second client');
+      const missing=await call(`/api/carddav-groups/${group.id}/members`,'POST',{contact_uid:'missing'},group.etag);assert.equal(missing.status,404);
+      const removed=await call(`/api/carddav-groups/${group.id}/members/${member.uid}`,'DELETE',undefined,group.etag);assert.equal(removed.status,200);group=await removed.json();assert.equal(group.member_uids.length,0);
+      const rawGroup=await client.readVCard(row.href);assert.equal(readGroup(rawGroup.raw)?.format,format);
+      assert.equal((await runSync(true)).errors,0);
+      const list=await(await call('/api/groups')).json();assert.ok(list.some((g:{id:string})=>g.id===group.id));assert.ok(list.some((g:{name:string})=>g.name==='Keep membership'));
+      const contacts=await(await call('/api/contacts')).json();assert.equal(contacts.some((c:{uid:string})=>c.uid===internal),false);
+      assert.equal((await call(`/api/carddav-groups/${group.id}`,'DELETE',undefined,group.etag)).status,204);
+    }
+    await db.query("UPDATE addressbooks SET sync_token='invalid-token',ctag=NULL");
     assert.equal((await runSync()).errors,0);
   } finally {
     if(server){server.closeAllConnections();await new Promise<void>(r=>server!.close(()=>r()));}

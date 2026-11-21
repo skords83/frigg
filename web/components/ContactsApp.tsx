@@ -36,7 +36,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   const [showExportImport, setShowExportImport] = useState(false);
 
   const { groups: smartGroups, addGroup, updateGroup, deleteGroup } = useSmartGroups();
-  const { groups: manualGroups, createGroup: createManualGroup, renameGroup: renameManualGroup, deleteGroup: deleteManualGroup, addMember, removeMember } = useGroups();
+  const { groups: manualGroups, error: groupError, clearError: clearGroupError, createGroup: createManualGroup, renameGroup: renameManualGroup, deleteGroup: deleteManualGroup, addMember, removeMember } = useGroups();
 
   useEffect(() => {
     setContacts(initialContacts);
@@ -175,10 +175,10 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
       {editingManualGroup !== null && (
         <ManualGroupModal
           initial={editingManualGroup === 'new' ? undefined : (editingManualGroup as ContactGroup)}
-          onSave={(name) => {
-            if (editingManualGroup === 'new') createManualGroup(name);
-            else renameManualGroup((editingManualGroup as ContactGroup).id, name);
-            setEditingManualGroup(null);
+          addressbooks={addressbooks}
+          onSave={async (name,options) => {
+            if (editingManualGroup === 'new') return !!(await createManualGroup(name,options));
+            return renameManualGroup((editingManualGroup as ContactGroup).id, name);
           }}
           onClose={() => setEditingManualGroup(null)}
         />
@@ -191,6 +191,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
           onClose={() => setShowExportImport(false)}
         />
       )}
+      {groupError&&<div role="alert" className="fixed top-3 right-3 z-50 max-w-sm rounded-lg bg-surface-raised border border-divider p-3 text-[13px]">{groupError}<button className="press block mt-2 text-accent" onClick={clearGroupError}>Schließen</button></div>}
       <PendingOperations onComplete={()=>invalidateContacts().then(()=>router.refresh())}/>
       <Sidebar
         addressbooks={addressbooks}

@@ -4,6 +4,7 @@ import { canAccessAddressbook } from '../auth/access';
 import type { AuthedRequest } from '../auth/middleware';
 
 import { withDavLock } from '../davLock';
+import {listCarddavGroups} from '../carddavGroups';
 
 const router = Router();
 
@@ -33,7 +34,7 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
       memberMap.get(m.group_id)!.push(m.contact_uid);
     }
 
-    res.json(groups.map((g) => ({ id: g.id, name: g.name, member_uids: memberMap.get(g.id) ?? [] })));
+    res.json([...groups.map((g) => ({ id: g.id, kind: 'local', name: g.name, member_uids: memberMap.get(g.id) ?? [] })), ...await listCarddavGroups(req.user!.id)]);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'internal' });

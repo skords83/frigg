@@ -74,6 +74,11 @@ export interface SmartGroup {
 }
 
 export interface ContactGroup {
+  kind?: 'local' | 'carddav';
+  etag?: string;
+  addressbook_id?: string;
+  format?: 'vcard4' | 'apple' | 'unknown';
+  unresolved_members?: string[];
   id: string;
   name: string;
   member_uids: string[];

@@ -21,7 +21,7 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
               birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
        FROM contacts
-       WHERE addressbook_id = ANY($1::text[])
+       WHERE addressbook_id = ANY($1::text[]) AND resource_kind = 'contact'
        ORDER BY family_name, given_name`,
       [visibleIds]
     );
@@ -117,7 +117,7 @@ router.post('/', withDavLock(async (req: AuthedRequest, res: Response) => {
 // GET /api/contacts/:uid/edit — a fresh, authorized editing baseline.
 router.get('/:uid/edit', async (req: AuthedRequest, res: Response) => {
   try {
-    const [stored] = await query<ContactRow>('SELECT * FROM contacts WHERE uid = $1', [req.params.uid]);
+    const [stored] = await query<ContactRow>("SELECT * FROM contacts WHERE uid = $1 AND resource_kind = 'contact'", [req.params.uid]);
     if (!stored || !(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) return res.status(404).json({ error: 'not found' });
     res.setHeader('Cache-Control', 'no-store');
     res.json(publicEditContact((await readRemoteContact(stored)).contact));
@@ -130,7 +130,7 @@ router.get('/:uid/edit', async (req: AuthedRequest, res: Response) => {
 async function saveContact(req: AuthedRequest, res: Response, photoOnly = false) {
   let stored: ContactRow | undefined;
   try {
-    [stored] = await query<ContactRow>('SELECT * FROM contacts WHERE uid = $1', [req.params.uid]);
+    [stored] = await query<ContactRow>("SELECT * FROM contacts WHERE uid = $1 AND resource_kind = 'contact'", [req.params.uid]);
     if (!stored || !(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) return res.status(404).json({ error: 'not found' });
     if ((await query("SELECT 1 FROM contact_operations WHERE status NOT IN ('complete','cancelled') AND (source_uid=$1 OR target_uid=$1)",[stored.uid])).length) throw new DavError(409,'operation_pending');
     const etag = req.headers['if-match'];
@@ -177,7 +177,7 @@ router.patch('/:uid/move', (_req, res) => res.status(409).json({ error: 'operati
 router.delete('/:uid', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const [stored] = await query<{ etag: string; addressbook_id: string; href: string | null }>(
-      'SELECT etag, addressbook_id, href FROM contacts WHERE uid = $1',
+      "SELECT etag, addressbook_id, href FROM contacts WHERE uid = $1 AND resource_kind = 'contact'",
       [req.params.uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
