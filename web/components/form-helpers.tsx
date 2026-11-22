@@ -27,6 +27,8 @@ export function useModalClose(onClose: () => void, duration = 130) {
 }
 
 export function birthdayToDisplay(iso: string): string {
+  const partial = iso.match(/^--(\d{2})-?(\d{2})$/);
+  if (partial) return `${partial[2]}.${partial[1]}.`;
   // YYYY-MM-DD
   let m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) return `${m[3]}.${m[2]}.${m[1]}`;
@@ -37,6 +39,8 @@ export function birthdayToDisplay(iso: string): string {
 }
 
 export function birthdayToIso(display: string): string {
+  const partial = display.trim().match(/^(\d{1,2})\.(\d{1,2})\.?$/);
+  if (partial) return `--${partial[2].padStart(2, '0')}${partial[1].padStart(2, '0')}`;
   const m = display.trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
   if (!m) return display;
   return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
@@ -45,6 +49,7 @@ export function birthdayToIso(display: string): string {
 export function isValidBirthday(display: string): boolean {
   const s = display.trim();
   if (!s) return true;
+  if (/^\d{1,2}\.\d{1,2}\.?$/.test(s)) return isValidBirthday(s.replace(/\.?$/, '.') + '2000');
   const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
   if (!m) return false;
   const day = Number(m[1]);

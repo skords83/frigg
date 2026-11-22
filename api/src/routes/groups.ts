@@ -3,6 +3,9 @@ import { query, pool } from '../db';
 import { canAccessAddressbook } from '../auth/access';
 import type { AuthedRequest } from '../auth/middleware';
 
+import { withDavLock } from '../davLock';
+import {listCarddavGroups} from '../carddavGroups';
+
 const router = Router();
 
 interface ContactGroupRow {
@@ -31,15 +34,15 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
       memberMap.get(m.group_id)!.push(m.contact_uid);
     }
 
-    res.json(groups.map((g) => ({ id: g.id, name: g.name, member_uids: memberMap.get(g.id) ?? [] })));
+    res.json([...groups.map((g) => ({ id: g.id, kind: 'local', name: g.name, member_uids: memberMap.get(g.id) ?? [] })), ...await listCarddavGroups(req.user!.id)]);
   } catch (err) {
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
 
 // POST /api/groups
-router.post('/', async (req: AuthedRequest, res: Response) => {
+router.post('/', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const name = (req.body?.name ?? '').trim();
     if (!name) return res.status(400).json({ error: 'name required' });
@@ -52,13 +55,13 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
   } catch (err) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((err as any)?.code === '23505') return res.status(409).json({ error: 'name already exists' });
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 // PATCH /api/groups/:id
-router.patch('/:id', async (req: AuthedRequest, res: Response) => {
+router.patch('/:id', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const name = (req.body?.name ?? '').trim();
     if (!name) return res.status(400).json({ error: 'name required' });
@@ -72,13 +75,13 @@ router.patch('/:id', async (req: AuthedRequest, res: Response) => {
   } catch (err) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((err as any)?.code === '23505') return res.status(409).json({ error: 'name already exists' });
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 // DELETE /api/groups/:id
-router.delete('/:id', async (req: AuthedRequest, res: Response) => {
+router.delete('/:id', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const result = await pool.query(
       'DELETE FROM contact_groups WHERE id = $1 AND owner_id = $2',
@@ -87,13 +90,13 @@ router.delete('/:id', async (req: AuthedRequest, res: Response) => {
     if (result.rowCount === 0) return res.status(404).json({ error: 'not found' });
     res.status(204).end();
   } catch (err) {
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 // POST /api/groups/:id/members  { contact_uid }
-router.post('/:id/members', async (req: AuthedRequest, res: Response) => {
+router.post('/:id/members', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const contactUid = req.body?.contact_uid;
     if (!contactUid) return res.status(400).json({ error: 'contact_uid required' });
@@ -118,13 +121,13 @@ router.post('/:id/members', async (req: AuthedRequest, res: Response) => {
     );
     res.status(204).end();
   } catch (err) {
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 // DELETE /api/groups/:id/members/:contact_uid
-router.delete('/:id/members/:contact_uid', async (req: AuthedRequest, res: Response) => {
+router.delete('/:id/members/:contact_uid', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const [group] = await query<ContactGroupRow>(
       'SELECT id FROM contact_groups WHERE id = $1 AND owner_id = $2',
@@ -138,9 +141,9 @@ router.delete('/:id/members/:contact_uid', async (req: AuthedRequest, res: Respo
     );
     res.status(204).end();
   } catch (err) {
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 export default router;

@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { Contact, PhoneEntry, EmailEntry, AddressEntry } from '@/types/contact';
 import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
-import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToDisplay, birthdayToIso, normalizePhone, isValidEmail, isValidPhone, isValidBirthday } from './form-helpers';
+import { ConflictReview } from './ConflictReview';
+import { changedFields, resolveVersions, type Choices, type EditContact } from './conflicts';
+import { inputCls, FormSection, FormField, LabelSelect, RemoveButton, AddButton, ModalFooter, useModalClose, birthdayToDisplay, birthdayToIso, isValidBirthday } from './form-helpers';
 
 interface EditModalProps {
   contact: Contact;
@@ -28,6 +30,24 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
   const [error, setError] = useState<string | null>(null);
   const { closing, requestClose } = useModalClose(onClose);
 
+  const [base, setBase] = useState<EditContact>(contact);
+  const [loading, setLoading] = useState(true);
+  const [conflict, setConflict] = useState<{ base: EditContact; mine: EditContact; server: EditContact } | null>(null);
+  const [choices, setChoices] = useState<Choices>({});
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/contacts/${encodeURIComponent(contact.uid)}/edit`, { cache: 'no-store' }).then(async res => {
+      if (!res.ok) throw new Error();
+      const current: EditContact = await res.json();
+      if (!active) return;
+      setBase(current); setGivenName(current.given_name); setFamilyName(current.family_name);
+      setOrg(current.org ?? ''); setTitle(current.title ?? ''); setBirthday(birthdayToDisplay(current.birthday ?? ''));
+      setNote(current.note ?? ''); setPhones(current.phones); setEmails(current.emails); setAddresses(current.addresses);
+      setLoading(false);
+    }).catch(() => { if (active) setError('Die aktuelle Serverversion ist nicht verfügbar. Bitte später erneut öffnen.'); });
+    return () => { active = false; };
+  }, [contact.uid]);
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -39,79 +59,39 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
     reader.readAsDataURL(file);
   }
 
-  async function handleSave() {
-    if (emails.some((e) => e.value.trim() && !isValidEmail(e.value))) {
-      setError('Bitte eine gültige E-Mail-Adresse angeben.');
-      return;
-    }
-    if (phones.some((p) => p.value.trim() && !isValidPhone(p.value))) {
-      setError('Telefonnummer: nur Ziffern, +, Leerzeichen, Klammern und Bindestrich erlaubt.');
-      return;
-    }
-    if (!isValidBirthday(birthday)) {
-      setError('Bitte ein gültiges Geburtsdatum (TT.MM.JJJJ) angeben.');
-      return;
-    }
-    setSaving(true);
-    setError(null);
+  async function persist(original: EditContact, mine: EditContact) {
+    setSaving(true); setError(null);
     try {
-      let currentContact = contact;
-
-      if (photoPreview) {
-        const photoRes = await fetch(`/api/contacts/${contact.uid}/photo`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            photo_data_uri: photoPreview === 'remove' ? null : photoPreview,
-          }),
-        });
-        if (!photoRes.ok) throw new Error(`Photo HTTP ${photoRes.status}`);
-        currentContact = await photoRes.json();
-      }
-
-      const fn = `${givenName} ${familyName}`.trim() || familyName || givenName;
-      const res = await fetch(`/api/contacts/${contact.uid}`, {
+      const res = await fetch(`/api/contacts/${encodeURIComponent(contact.uid)}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'If-Match': currentContact.etag,
-        },
-        body: JSON.stringify({
-          fn,
-          given_name: givenName,
-          family_name: familyName,
-          org: org || null,
-          title: title || null,
-          birthday: birthday ? birthdayToIso(birthday) : null,
-          note: note || null,
-          phones: phones.filter((p) => p.value.trim()).map((p) => ({ ...p, value: normalizePhone(p.value) })),
-          emails,
-          addresses,
-        }),
+        headers: { 'Content-Type': 'application/json', 'If-Match': original.etag },
+        body: JSON.stringify(changedFields(original, mine)),
       });
-      if (res.status === 409) {
-        setError('Konflikt: Der Kontakt wurde zwischenzeitlich geändert. Bitte neu laden.');
+      const body = await res.json();
+      if (res.status === 409 && body.server) {
+        setConflict({ base: original, mine, server: body.server }); setChoices({}); return;
+      }
+      if (!res.ok) {
+        setError(body.error === 'contact_unavailable' ? 'Der Kontakt wurde gelöscht oder ist nicht mehr verfügbar. Deine Eingaben bleiben erhalten.' : body.error === 'stale_property' ? 'Eigenschaften wurden auf dem Server verändert. Bitte die Serverversion verwenden oder den Kontakt erneut öffnen.' : 'Speichern nicht bestätigt. Deine Eingaben bleiben erhalten; bitte den Serverzustand prüfen.');
         return;
       }
-      if (res.status === 400) {
-        const body = await res.json().catch(() => null);
-        if (body?.error === 'invalid_email') {
-          setError('Bitte eine gültige E-Mail-Adresse angeben.');
-          return;
-        }
-        if (body?.error === 'invalid_phone') {
-          setError('Telefonnummer: nur Ziffern, +, Leerzeichen, Klammern und Bindestrich erlaubt.');
-          return;
-        }
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const updated: Contact = await res.json();
-      requestClose(() => onSave(updated));
-    } catch {
-      setError('Speichern fehlgeschlagen. Bitte erneut versuchen.');
-    } finally {
-      setSaving(false);
-    }
+      requestClose(() => onSave(body));
+    } catch { setError('Der Server ist nicht erreichbar. Deine Eingaben bleiben erhalten.'); }
+    finally { setSaving(false); }
+  }
+
+  async function handleSave() {
+    if (loading || saving) return;
+    if (birthday !== birthdayToDisplay(base.birthday ?? '') && !isValidBirthday(birthday)) { setError('Bitte ein gültiges Geburtsdatum angeben.'); return; }
+    const nameChanged = givenName !== base.given_name || familyName !== base.family_name;
+    const mine: EditContact = { ...base,
+      fn: nameChanged ? `${givenName} ${familyName}`.trim() : base.fn,
+      given_name: givenName, family_name: familyName, org: org || null, title: title || null,
+      birthday: birthday === birthdayToDisplay(base.birthday ?? '') ? base.birthday : birthday ? birthdayToIso(birthday) : null,
+      note: note || null, phones: phones.filter(p => p.value.trim()), emails, addresses,
+      photo_data_uri: photoPreview === null ? base.photo_data_uri : photoPreview === 'remove' ? null : photoPreview,
+    };
+    await persist(base, mine);
   }
 
   function updatePhone(i: number, p: PhoneEntry) {
@@ -157,6 +137,12 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
 
         {/* Body */}
         <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
+          {loading && <p role="status" className="text-[13px] text-muted">Aktuelle Serverversion wird geladen …</p>}
+          {conflict ? <ConflictReview {...conflict} choices={choices} onChoice={setChoices} saving={saving}
+            onCancel={() => setConflict(null)} onSave={() => {
+              const resolved = resolveVersions(conflict.base, conflict.mine, conflict.server, choices);
+              if (resolved) void persist(conflict.server, resolved);
+            }} /> : <fieldset disabled={loading || saving} className="space-y-6">
           {/* Avatar */}
           <div className="flex flex-col items-center gap-2 pt-1 pb-2">
             <button
@@ -167,7 +153,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
               <Seal
                 initials={getInitials(givenName, familyName)}
                 size="lg"
-                photoUrl={photoPreview === 'remove' ? null : (photoPreview ?? contactPhotoUrl(contact))}
+                photoUrl={photoPreview === 'remove' ? null : (photoPreview ?? base.photo_data_uri ?? contactPhotoUrl(contact))}
               />
               <span className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -183,7 +169,7 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
               className="hidden"
               onChange={handleFileChange}
             />
-            {photoPreview !== 'remove' && (photoPreview ?? contactPhotoUrl(contact)) && (
+            {photoPreview !== 'remove' && (photoPreview ?? base.photo_data_uri ?? contactPhotoUrl(contact)) && (
               <button
                 type="button"
                 onClick={() => setPhotoPreview('remove')}
@@ -322,9 +308,10 @@ export function EditModal({ contact, onClose, onSave }: EditModalProps) {
               placeholder="Notiz ..."
             />
           </FormSection>
+          </fieldset>}
         </div>
 
-        <ModalFooter error={error} saving={saving} onClose={() => requestClose()} onSave={handleSave} />
+        {conflict ? <div className="px-6 pb-4 text-[13px] text-muted" role="alert">{error}</div> : <ModalFooter error={error} saving={saving || loading} onClose={() => requestClose()} onSave={handleSave} />}
       </div>
     </div>
   );

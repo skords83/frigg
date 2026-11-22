@@ -228,7 +228,7 @@ function groupByLetter(contacts: Contact[]): GroupedContacts[] {
 
 function parseBirthday(raw: string): { month: number; day: number } | null {
   // YYYY-MM-DD or --MM-DD
-  let m = raw.match(/^(?:\d{4}|--)[-–](\d{2})[-–](\d{2})$/);
+  let m = raw.match(/^(?:\d{4}[-–]|--)(\d{2})[-–]?(\d{2})$/);
   if (m) return { month: parseInt(m[1]), day: parseInt(m[2]) };
   // YYYYMMDD
   m = raw.match(/^(\d{4})(\d{2})(\d{2})$/);

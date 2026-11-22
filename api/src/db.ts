@@ -5,8 +5,9 @@ export const pool = new Pool({
   max: 10,
 });
 
-pool.on('error', (err) => {
-  console.error('Unexpected PG pool error', err);
+pool.on('error', () => {
+  // pg-pool errors can include the client and its connection/authentication state.
+  console.error('Unexpected PG pool error; connection discarded');
 });
 
 export async function query<T = Record<string, unknown>>(

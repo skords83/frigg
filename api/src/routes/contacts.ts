@@ -1,10 +1,15 @@
 import { Router, Response } from 'express';
 import { query, pool } from '../db';
-import { getClientForAddressbook, parseVCard, patchVCard, patchPhotoInVCard, escapeVCardValue, escapeVCardComponent, labelToVCardType } from '../carddav';
+import { getClientForAddressbook, parseVCard } from '../carddav';
 import { getVisibleAddressbookIds, canAccessAddressbook } from '../auth/access';
 import { hasInvalidEmail, hasInvalidPhone, isInvalidBirthday, withoutEmptyPhones, createContact } from '../contactOps';
 import type { AuthedRequest } from '../auth/middleware';
 import type { ContactRow } from '../types';
+
+import { DavError, requireEtag, resourceUrl } from '../davSafety';
+import { withDavLock } from '../davLock';
+import { readRemoteContact, publicEditContact } from '../remoteContact';
+import { patchDocument, projectDocument, type EditableFields } from '../vcardDocument';
 
 const router = Router();
 
@@ -16,13 +21,14 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
       `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
               birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
        FROM contacts
-       WHERE addressbook_id = ANY($1::text[])
+       WHERE addressbook_id = ANY($1::text[]) AND resource_kind = 'contact'
        ORDER BY family_name, given_name`,
       [visibleIds]
     );
     res.json(contacts);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -42,7 +48,8 @@ router.get('/:uid', async (req: AuthedRequest, res: Response) => {
     }
     res.json(contact);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -70,13 +77,14 @@ router.get('/:uid/photo', async (req: AuthedRequest, res: Response) => {
     res.setHeader('ETag', etag);
     res.send(Buffer.from(base64, 'base64'));
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
 
 // POST /api/contacts — create new contact
-router.post('/', async (req: AuthedRequest, res: Response) => {
+router.post('/', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const { addressbook_id, fn, given_name, family_name, org, title, birthday, note, emails, addresses } = req.body;
     const phones = withoutEmptyPhones(req.body.phones);
@@ -100,256 +108,76 @@ router.post('/', async (req: AuthedRequest, res: Response) => {
     });
     res.status(201).json(created);
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
-// PUT /api/contacts/:uid — update existing contact
-router.put('/:uid', async (req: AuthedRequest, res: Response) => {
+// GET /api/contacts/:uid/edit — a fresh, authorized editing baseline.
+router.get('/:uid/edit', async (req: AuthedRequest, res: Response) => {
   try {
-    const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string }>(
-      'SELECT etag, raw_vcard, addressbook_id FROM contacts WHERE uid = $1',
-      [req.params.uid]
-    );
-    if (!stored) return res.status(404).json({ error: 'not found' });
-    if (!(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-
-    // ETag conflict check
-    const clientEtag = req.headers['if-match'];
-    if (clientEtag && clientEtag !== stored.etag) {
-      return res.status(409).json({ error: 'conflict', serverEtag: stored.etag });
-    }
-
-    const { fn, given_name, family_name, org, title, birthday, note, emails, addresses } = req.body;
-    const phones = req.body.phones !== undefined ? withoutEmptyPhones(req.body.phones) : undefined;
-
-    if (hasInvalidEmail(emails)) {
-      return res.status(400).json({ error: 'invalid_email' });
-    }
-    if (hasInvalidPhone(phones)) {
-      return res.status(400).json({ error: 'invalid_phone' });
-    }
-    if (isInvalidBirthday(birthday)) {
-      return res.status(400).json({ error: 'invalid_birthday' });
-    }
-
-    // Patch only the known fields into the raw vCard (preserves unknown properties).
-    // Each value is pre-escaped by the caller; patchVCard writes them as-is.
-    // Trailing backslashes are stripped from name fields to recover previously corrupted data.
-    const patchFields: Record<string, string> = {};
-    if (fn !== undefined) patchFields['FN'] = escapeVCardValue((fn ?? '').replace(/\\+$/g, ''));
-    if (given_name !== undefined || family_name !== undefined) {
-      const g = escapeVCardComponent(((given_name ?? '') as string).replace(/\\+$/g, ''));
-      const f = escapeVCardComponent(((family_name ?? '') as string).replace(/\\+$/g, ''));
-      patchFields['N'] = `${f};${g};;;`;
-    }
-    if (org !== undefined) patchFields['ORG'] = org ? escapeVCardValue(org) : '';
-    if (title !== undefined) patchFields['TITLE'] = title ? escapeVCardValue(title) : '';
-    if (birthday !== undefined) patchFields['BDAY'] = birthday ?? '';
-    if (note !== undefined) patchFields['NOTE'] = note ? escapeVCardValue(note) : '';
-
-    // Multi-value fields: replace all TEL/EMAIL/ADR lines in the raw vCard so the
-    // CardDAV server gets the authoritative data (not stale values from a previous sync).
-    const multiFields: Record<string, string[]> = {};
-    if (phones !== undefined) {
-      multiFields['TEL'] = (phones as { label: string; value: string }[]).map(
-        (p) => `TEL;TYPE=${labelToVCardType(p.label)}:${escapeVCardValue(p.value)}`
-      );
-    }
-    if (emails !== undefined) {
-      multiFields['EMAIL'] = (emails as { label: string; value: string }[]).map(
-        (e) => `EMAIL;TYPE=${labelToVCardType(e.label)}:${escapeVCardValue(e.value)}`
-      );
-    }
-    if (addresses !== undefined) {
-      multiFields['ADR'] = (addresses as { label: string; street: string; city: string; state?: string; zip: string; country?: string }[]).map(
-        (a) => `ADR;TYPE=${labelToVCardType(a.label)}:;;${escapeVCardComponent(a.street)};${escapeVCardComponent(a.city)};${escapeVCardComponent(a.state ?? '')};${escapeVCardComponent(a.zip)};${escapeVCardComponent(a.country ?? '')}`
-      );
-    }
-
-    const newRawVcard = patchVCard(stored.raw_vcard, patchFields, multiFields);
-
-    const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
-    if (!book) return res.status(500).json({ error: 'address book not found' });
-    const client = await getClientForAddressbook(stored.addressbook_id);
-
-    const vcardUrl = `${book.url}${req.params.uid}.vcf`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateResult: any = await client.updateVCard({
-      vCard: { url: vcardUrl, data: newRawVcard, etag: stored.etag },
-    });
-    // tsdav returns a raw Fetch Response; the ETag is in the response headers
-    const newEtag: string = updateResult?.headers?.get?.('etag') ?? updateResult?.etag ?? stored.etag;
-
-    // Rebuild the parsed data from the new raw vCard
-    const parsed = parseVCard(newRawVcard);
-
-    await pool.query(
-      `UPDATE contacts SET
-         etag = $1, fn = $2, given_name = $3, family_name = $4, org = $5, title = $6,
-         birthday = $7, note = $8, phones = $9::jsonb, emails = $10::jsonb,
-         addresses = $11::jsonb, raw_vcard = $12, updated_at = now()
-       WHERE uid = $13`,
-      [
-        newEtag,
-        parsed?.fn ?? fn ?? '',
-        parsed?.given_name ?? given_name ?? '',
-        parsed?.family_name ?? family_name ?? '',
-        parsed?.org ?? org ?? null,
-        parsed?.title ?? title ?? null,
-        parsed?.birthday ?? birthday ?? null,
-        parsed?.note ?? note ?? null,
-        JSON.stringify(phones !== undefined ? phones : (parsed?.phones ?? [])),
-        JSON.stringify(emails !== undefined ? emails : (parsed?.emails ?? [])),
-        JSON.stringify(addresses !== undefined ? addresses : (parsed?.addresses ?? [])),
-        newRawVcard,
-        req.params.uid,
-      ]
-    );
-
-    const [updated] = await query<ContactRow>(
-      `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
-       FROM contacts WHERE uid = $1`,
-      [req.params.uid]
-    );
-    res.json(updated);
+    const [stored] = await query<ContactRow>("SELECT * FROM contacts WHERE uid = $1 AND resource_kind = 'contact'", [req.params.uid]);
+    if (!stored || !(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) return res.status(404).json({ error: 'not found' });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(publicEditContact((await readRemoteContact(stored)).contact));
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'internal' });
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    res.status(503).json({ error: 'dav_unavailable' });
   }
 });
 
-// PATCH /api/contacts/:uid/photo
-router.patch('/:uid/photo', async (req: AuthedRequest, res: Response) => {
+async function saveContact(req: AuthedRequest, res: Response, photoOnly = false) {
+  let stored: ContactRow | undefined;
   try {
-    const [stored] = await query<{ etag: string; raw_vcard: string; addressbook_id: string }>(
-      'SELECT etag, raw_vcard, addressbook_id FROM contacts WHERE uid = $1',
-      [req.params.uid]
-    );
-    if (!stored) return res.status(404).json({ error: 'not found' });
-    if (!(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-
-    const { photo_data_uri } = req.body as { photo_data_uri?: string | null };
-    const removing = photo_data_uri === null || photo_data_uri === '';
-    if (!removing && !photo_data_uri?.startsWith('data:image/')) {
-      return res.status(400).json({ error: 'invalid photo_data_uri' });
-    }
-
-    const newRawVcard = removing
-      ? stored.raw_vcard.replace(/^PHOTO[;:][^\r\n]*(?:\r?\n[ \t][^\r\n]*)*/gim, '').replace(/(\r?\n){3,}/g, '\r\n')
-      : patchPhotoInVCard(stored.raw_vcard, photo_data_uri!);
-
-    const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
-    if (!book) return res.status(500).json({ error: 'address book not found' });
-    const client = await getClientForAddressbook(stored.addressbook_id);
-
-    const vcardUrl = `${book.url}${req.params.uid}.vcf`;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateResult: any = await client.updateVCard({
-      vCard: { url: vcardUrl, data: newRawVcard, etag: stored.etag },
-    });
-    const newEtag: string = updateResult?.headers?.get?.('etag') ?? updateResult?.etag ?? stored.etag;
-
+    [stored] = await query<ContactRow>("SELECT * FROM contacts WHERE uid = $1 AND resource_kind = 'contact'", [req.params.uid]);
+    if (!stored || !(await canAccessAddressbook(req.user!.id, stored.addressbook_id))) return res.status(404).json({ error: 'not found' });
+    if ((await query("SELECT 1 FROM contact_operations WHERE status NOT IN ('complete','cancelled') AND (source_uid=$1 OR target_uid=$1)",[stored.uid])).length) throw new DavError(409,'operation_pending');
+    const etag = req.headers['if-match'];
+    requireEtag(etag);
+    const latest = await readRemoteContact(stored);
+    if (latest.contact.etag !== etag) return res.status(409).json({ error: 'conflict', server: publicEditContact(latest.contact) });
+    const fields: EditableFields = {};
+    const allowed = photoOnly ? ['photo_data_uri'] : ['fn', 'given_name', 'family_name', 'org', 'title', 'birthday', 'note', 'phones', 'emails', 'addresses', 'photo_data_uri'];
+    for (const key of allowed) if (req.body[key] !== undefined) Object.assign(fields, { [key]: req.body[key] });
+    // Validate only changed values; externally created values must survive unrelated edits.
+    if (fields.birthday !== undefined && fields.birthday !== latest.contact.birthday && isInvalidBirthday(fields.birthday)) return res.status(400).json({ error: 'invalid_birthday' });
+    const raw = patchDocument(latest.contact.raw_vcard, fields);
+    if (raw === latest.contact.raw_vcard) return res.json(publicEditContact(latest.contact));
+    const response = await latest.client.updateVCard({ vCard: { url: latest.url, etag, data: raw } });
+    const parsed = projectDocument(raw);
+    const newEtag = response.headers.get('etag') ?? '';
     await pool.query(
-      `UPDATE contacts SET etag = $1, photo_data_uri = $2, raw_vcard = $3, updated_at = now() WHERE uid = $4`,
-      [newEtag, removing ? null : photo_data_uri, newRawVcard, req.params.uid]
+      `UPDATE contacts SET etag=$1, fn=$2, given_name=$3, family_name=$4, org=$5, title=$6,
+       birthday=$7, note=$8, phones=$9::jsonb, emails=$10::jsonb, addresses=$11::jsonb,
+       raw_vcard=$12, photo_data_uri=$13, updated_at=now() WHERE uid=$14`,
+      [newEtag, parsed.fn, parsed.given_name, parsed.family_name, parsed.org, parsed.title,
+       parsed.birthday, parsed.note, JSON.stringify(parsed.phones), JSON.stringify(parsed.emails),
+       JSON.stringify(parsed.addresses), raw, parsed.photo_data_uri, stored.uid]
     );
-
-    const [updated] = await query<ContactRow>(
-      `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
-       FROM contacts WHERE uid = $1`,
-      [req.params.uid]
-    );
-    res.json(updated);
+    return res.json(publicEditContact({ ...latest.contact, ...parsed, uid: stored.uid, vcard_uid: parsed.uid, etag: newEtag, has_photo: !!parsed.photo_data_uri }));
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'internal' });
+    if (err instanceof DavError && err.code === 'conflict' && stored) {
+      try {
+        return res.status(409).json({ error: 'conflict', server: publicEditContact((await readRemoteContact(stored)).contact) });
+      } catch { return res.status(409).json({ error: 'contact_unavailable' }); }
+    }
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact save failed');
+    return res.status(503).json({ error: 'save_unconfirmed' });
   }
-});
+}
+router.put('/:uid', withDavLock((req, res) => saveContact(req, res)));
+router.patch('/:uid/photo', withDavLock((req, res) => saveContact(req, res, true)));
 
-// PATCH /api/contacts/:uid/move — move to a different address book
-router.patch('/:uid/move', async (req: AuthedRequest, res: Response) => {
-  try {
-    const { uid } = req.params;
-    const { addressbook_id: newBookId } = req.body as { addressbook_id?: string };
-    if (!newBookId) return res.status(400).json({ error: 'addressbook_id required' });
-
-    const [stored] = await query<{ etag: string; addressbook_id: string; raw_vcard: string }>(
-      'SELECT etag, addressbook_id, raw_vcard FROM contacts WHERE uid = $1',
-      [uid]
-    );
-    if (!stored) return res.status(404).json({ error: 'not found' });
-
-    if (
-      !(await canAccessAddressbook(req.user!.id, stored.addressbook_id)) ||
-      !(await canAccessAddressbook(req.user!.id, newBookId))
-    ) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-
-    if (stored.addressbook_id === newBookId) {
-      const [current] = await query<ContactRow>(
-        `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-                birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
-         FROM contacts WHERE uid = $1`,
-        [uid]
-      );
-      return res.json(current);
-    }
-
-    const [[oldBook], [newBook]] = await Promise.all([
-      query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]),
-      query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [newBookId]),
-    ]);
-    if (!newBook) return res.status(404).json({ error: 'target address book not found' });
-
-    // Source and destination books may belong to different CardDAV accounts
-    // (e.g. moving a contact into a book shared by another Frigg user), so
-    // each needs its own client resolved independently.
-    if (oldBook) {
-      const oldClient = await getClientForAddressbook(stored.addressbook_id);
-      await oldClient.deleteVCard({ vCard: { url: `${oldBook.url}${uid}.vcf`, etag: stored.etag } as never });
-    }
-
-    const newClient = await getClientForAddressbook(newBookId);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const createResult: any = await newClient.createVCard({
-      addressBook: { url: newBook.url },
-      filename: `${uid}.vcf`,
-      vCardString: stored.raw_vcard,
-    });
-    const newEtag: string = createResult?.etag ?? stored.etag;
-
-    await pool.query(
-      'UPDATE contacts SET addressbook_id = $1, etag = $2, updated_at = now() WHERE uid = $3',
-      [newBookId, newEtag, uid]
-    );
-
-    const [updated] = await query<ContactRow>(
-      `SELECT uid, addressbook_id, etag, fn, given_name, family_name, org, title,
-              birthday, note, (photo_data_uri IS NOT NULL) AS has_photo, phones, emails, addresses, created_at, updated_at
-       FROM contacts WHERE uid = $1`,
-      [uid]
-    );
-    res.json(updated);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'internal' });
-  }
-});
+// Legacy clients must use the preview/execute operation API to obtain resumability.
+router.patch('/:uid/move', (_req, res) => res.status(409).json({ error: 'operation_preview_required' }));
 
 // DELETE /api/contacts/:uid
-router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
+router.delete('/:uid', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
-    const [stored] = await query<{ etag: string; addressbook_id: string }>(
-      'SELECT etag, addressbook_id FROM contacts WHERE uid = $1',
+    const [stored] = await query<{ etag: string; addressbook_id: string; href: string | null }>(
+      "SELECT etag, addressbook_id, href FROM contacts WHERE uid = $1 AND resource_kind = 'contact'",
       [req.params.uid]
     );
     if (!stored) return res.status(404).json({ error: 'not found' });
@@ -357,24 +185,28 @@ router.delete('/:uid', async (req: AuthedRequest, res: Response) => {
       return res.status(403).json({ error: 'forbidden' });
     }
 
+    if ((await query("SELECT 1 FROM contact_operations WHERE status NOT IN ('complete','cancelled') AND (source_uid=$1 OR target_uid=$1)",[req.params.uid])).length) throw new DavError(409,'operation_pending');
     const clientEtag = req.headers['if-match'];
+    requireEtag(clientEtag);
     if (clientEtag && clientEtag !== stored.etag) {
       return res.status(409).json({ error: 'conflict', serverEtag: stored.etag });
     }
 
     const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [stored.addressbook_id]);
     const client = await getClientForAddressbook(stored.addressbook_id);
+    if (!book) throw new DavError(409, 'sync_required');
     if (book) {
-      const vcardUrl = `${book.url}${req.params.uid}.vcf`;
+      const vcardUrl = resourceUrl(book.url, stored.href);
       await client.deleteVCard({ vCard: { url: vcardUrl, etag: stored.etag } as never });
     }
 
     await pool.query('DELETE FROM contacts WHERE uid = $1', [req.params.uid]);
     res.status(204).end();
   } catch (err) {
-    console.error(err);
+    if (err instanceof DavError) return res.status(err.status).json({ error: err.code });
+    console.error('Contact operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 export default router;

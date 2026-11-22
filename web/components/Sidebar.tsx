@@ -151,7 +151,7 @@ export function Sidebar({
         {manualGroups.map((g) => (
           <GroupItem
             key={g.id}
-            group={g}
+            group={{...g,name:g.kind==='carddav'?`${g.name} · synchronisiert`:`${g.name} · lokal`}}
             count={manualGroupCounts[g.id] ?? 0}
             active={selected === `mgroup:${g.id}`}
             onClick={() => onSelect(`mgroup:${g.id}`)}

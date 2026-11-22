@@ -116,3 +116,20 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .press:active { transform: none; }
 }
+
+/* Preserve the three desktop panes; show one navigable pane on narrow screens. */
+.frigg-layout { display: grid; height: 100dvh; overflow: hidden; grid-template-columns: 220px 300px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.app-pane { display: contents; }
+.mobile-navigation, .mobile-move { display: none; }
+@media (max-width: 900px) {
+  .frigg-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: 44px minmax(0, 1fr); }
+  .mobile-navigation { display: flex; }
+  .app-pane { display: none; min-height: 0; min-width: 0; overflow: hidden; }
+  .frigg-layout[data-pane="navigation"] .navigation-pane,
+  .frigg-layout[data-pane="list"] .list-pane,
+  .frigg-layout[data-pane="detail"] .detail-pane { display: flex; flex-direction: column; }
+  .app-pane > * { flex: 1; min-height: 0; }
+  .navigation-pane > aside { overflow-y: auto; }
+  .contact-detail { padding: 24px 20px; }
+  .mobile-move { display: flex; }
+}

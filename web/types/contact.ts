@@ -1,14 +1,17 @@
 export interface PhoneEntry {
+  property_id?: string;
   label: string;
   value: string;
 }
 
 export interface EmailEntry {
+  property_id?: string;
   label: string;
   value: string;
 }
 
 export interface AddressEntry {
+  property_id?: string;
   label: string;
   street: string;
   city: string;
@@ -71,6 +74,11 @@ export interface SmartGroup {
 }
 
 export interface ContactGroup {
+  kind?: 'local' | 'carddav';
+  etag?: string;
+  addressbook_id?: string;
+  format?: 'vcard4' | 'apple' | 'unknown';
+  unresolved_members?: string[];
   id: string;
   name: string;
   member_uids: string[];
