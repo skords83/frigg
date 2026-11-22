@@ -56,8 +56,12 @@ export function readDocument(raw: string): ContentLine[] {
     } else logical.push(line);
   }
   const occurrences = new Map<string, number>();
-  const lines = logical.map(original => {
-    const unfolded = original.replace(/\r\n[ \t]/g, '');
+  // Unfold before filtering so continuations cannot attach to the wrong property.
+  // Preserve meaningful whitespace and empty property values.
+  const content = logical.map(original => ({
+    original, unfolded: original.replace(/\r\n[ \t]/g, ''),
+  })).filter(line => line.unfolded !== '');
+  const lines = content.map(({ original, unfolded }) => {
     let quoted = false, colon = -1;
     for (let i = 0; i < unfolded.length; i++) {
       if (unfolded[i] === '"') quoted = !quoted;

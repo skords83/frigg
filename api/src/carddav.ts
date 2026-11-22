@@ -1,6 +1,6 @@
 import { createDAVClient } from 'tsdav';
 import VCF from 'vcf';
-import { projectDocument } from './vcardDocument';
+import { projectDocument, readDocument } from './vcardDocument';
 import { DavError, requireEtag, guardedDavFetch, resourceUrl } from './davSafety';
 import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
 import { query } from './db';
@@ -152,7 +152,9 @@ export function parseVCard(raw: string): ParsedCard | null {
   try {
     // Preserve the original syntax; vcf remains a secondary interoperability check.
     const projected = projectDocument(raw);
-    VCF.parse(raw.replace(/\r?\n/g, '\r\n'));
+    // Give the secondary parser the accepted lines; preserve raw_vcard unchanged.
+    const content = readDocument(raw).map(line => line.original).join('\r\n') + '\r\n';
+    VCF.parse(content);
     return projected;
   } catch {
     return null;
