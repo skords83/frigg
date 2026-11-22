@@ -414,9 +414,9 @@ Testbarrieren halten gezielt Requests/Checkpoints an; sie ersetzen weder SQL noc
 DAV-Ergebnisse. Fehler werden durch SIGKILL und `pg_terminate_backend` erzeugt.
 
 Lokal geprüft mit PostgreSQL **18.7**, Baïkal **0.13.0**, Node **26.13.1**.
-Der CI-Schritt verwendet PostgreSQL **16**, passend zu `compose.yaml`, und Node 22.
-Lokaler Erfolg auf 18 ist allein kein Nachweis für Version 16; dessen Nachweis ist
-separat über den ergänzten CI-Lauf zu prüfen.
+Zusätzlich BESTANDEN in [CI #16](https://github.com/skords83/frigg/actions/runs/45017745905)
+auf PostgreSQL **16.16**, passend zur Hauptversion in `compose.yaml`, und Node 22.
+Alle oben genannten nativen Szenarien liefen dort ohne Skip erfolgreich durch.
 
 | Automatisiertes Szenario | Ergebnis / überprüfte Invariante |
 | --- | --- |
@@ -667,8 +667,11 @@ beseitigt werden. Keine pauschale Sicherheits- oder Kompatibilitätsfreigabe.
 | `npm audit` | TEILWEISE GEPRÜFT: Exit 1, zwei moderate Meldungen, null hoch/kritisch; Pfadbewertung oben |
 | `git diff --check` | BESTANDEN |
 
-Die CI des erweiterten Branches wird nach dem Push separat geprüft; der erfolgreiche
-Ausgangslauf #12 allein bestätigt nicht die neuen PostgreSQL-16-Tests.
+GitHub-CI des geprüften Code-/Workflow-Stands `72bd0d8`: **BESTANDEN**,
+[Integrity tests #16](https://github.com/skords83/frigg/actions/runs/45017745905).
+Bestätigt sind alle vorhandenen Prüfungen und die neue native PostgreSQL-16-Suite
+(kein Skip). Der nachfolgende Commit ergänzt ausschließlich diesen Nachweis in
+der Dokumentation; Anwendungscode und Tests bleiben identisch.
 
 CI-Erstlauf der Ergänzungen [#14](https://github.com/skords83/frigg/actions/runs/44995940181):
 alle bisherigen Prüfungen bestanden, native Suite noch nicht gestartet. Ursache:
