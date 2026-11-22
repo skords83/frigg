@@ -25,10 +25,11 @@ export function resourceUrl(bookUrl: string, href: string | null | undefined): s
 
 export function guardedDavFetch(transport: typeof fetch = fetch): typeof fetch {
   return async (input, init) => {
-    const method = (init?.method ?? 'GET').toUpperCase();
+    const request = input instanceof Request ? input : undefined;
+    const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
     const writing = method === 'PUT' || method === 'DELETE';
     if (writing) {
-      const headers = new Headers(init?.headers);
+      const headers = new Headers(init?.headers ?? request?.headers);
       if (!(method === 'PUT' && headers.get('if-none-match') === '*')) {
         requireEtag(headers.get('if-match'));
       }
@@ -48,6 +49,9 @@ export function guardedDavFetch(transport: typeof fetch = fetch): typeof fetch {
       if ([404, 409, 412].includes(response.status)) throw new DavError(409, 'conflict');
       if (response.status === 401 || response.status === 403) throw new DavError(403, 'dav_forbidden');
       throw new DavError(502, 'dav_write_failed');
+    }
+    if (!writing && !response.ok && response.status !== 404) {
+      throw new DavError(response.status === 401 || response.status === 403 ? 403 : 503, 'dav_read_failed');
     }
     return response;
   };

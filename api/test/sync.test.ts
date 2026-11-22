@@ -20,13 +20,13 @@ test('synchronization failure regression tests', async (t) => {
   try {
     await t.test('parse failure preserves old rows and reports an error', async () => {
       statements = [];
-      const result = await fullSync({ fetchVCards: async () => [{ url: book.url + 'existing', data: 'invalid', etag: '"x"' }] }, book, 'book', 'synthetic');
+      const result = await fullSync({ readVCard: async () => ({raw:'invalid',etag:'"x"'}), fetchVCards: async () => [{ url: book.url + 'existing', data: 'invalid', etag: '"x"' }] }, book, 'book', 'synthetic');
       assert.equal(result.errors, 1);
       assert.equal(statements.some(s => s.sql.startsWith('DELETE')), false);
     });
     await t.test('UID collisions cannot reassign a contact to another book', async () => {
       statements = []; collision = true;
-      const result = await fullSync({ fetchVCards: async () => [{ url: book.url + 'random', data: card, etag: '"x"' }] }, book, 'book', 'synthetic');
+      const result = await fullSync({ readVCard: async () => ({raw:card,etag:'"x"'}), fetchVCards: async () => [{ url: book.url + 'random', data: card, etag: '"x"' }] }, book, 'book', 'synthetic');
       assert.equal(result.errors, 1);
       assert.match(statements[0].sql, /WHERE contacts.addressbook_id = EXCLUDED.addressbook_id/);
       assert.equal(statements.some(s => s.sql.startsWith('DELETE')), false);
@@ -68,6 +68,7 @@ test('synchronization failure regression tests', async (t) => {
       statements = [];
       const result = await deltaSync({
         syncCollection: async () => [{ status: 200, href: '/book/no-extension', raw: { multistatus: { syncToken: 'new' } } }],
+        readVCard: async () => ({raw:card,etag:'"new"'}),
         addressBookMultiGet: async () => [{ status: 200, href: '/book/no-extension', props: { getetag: '"new"', addressData: card } }],
       }, book, 'book', 'synthetic', 'old');
       assert.equal(result.synced, 1);

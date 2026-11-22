@@ -1,14 +1,17 @@
 export interface PhoneEntry {
+  property_id?: string;
   label: string;
   value: string;
 }
 
 export interface EmailEntry {
+  property_id?: string;
   label: string;
   value: string;
 }
 
 export interface AddressEntry {
+  property_id?: string;
   label: string;
   street: string;
   city: string;
@@ -18,7 +21,10 @@ export interface AddressEntry {
 }
 
 export interface ContactRow {
+  /** Opaque internal ID; retained for compatibility with existing group references. */
   uid: string;
+  vcard_uid: string;
+  resource_kind: 'contact' | 'group';
   addressbook_id: string;
   href: string | null;
   etag: string;

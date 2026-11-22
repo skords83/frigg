@@ -6,6 +6,8 @@ import { hasInvalidEmail, hasInvalidPhone, isInvalidBirthday, createContact } fr
 import type { AuthedRequest } from '../auth/middleware';
 import type { ContactRow } from '../types';
 
+import { withDavLock } from '../davLock';
+
 const router = Router();
 
 const CSV_HEADERS = [
@@ -96,7 +98,7 @@ router.get('/export', async (req: AuthedRequest, res: Response) => {
     res.setHeader('Content-Disposition', 'attachment; filename="frigg-export.csv"');
     res.send(csv);
   } catch (err) {
-    console.error(err);
+    console.error('Transfer operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -140,7 +142,7 @@ function parseLabelValuePairs(raw: string): { label: string; value: string }[] {
 interface ImportError { line: number; message: string; }
 
 // POST /api/transfer/import  { addressbook_id, format: 'vcard'|'csv', content: string }
-router.post('/import', async (req: AuthedRequest, res: Response) => {
+router.post('/import', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const { addressbook_id: addressbookId, format, content } = req.body as {
       addressbook_id?: string; format?: string; content?: string;
@@ -160,18 +162,11 @@ router.post('/import', async (req: AuthedRequest, res: Response) => {
       for (let i = 0; i < cards.length; i++) {
         const parsed = parseVCard(cards[i]);
         if (!parsed) { errors.push({ line: i + 1, message: 'vCard konnte nicht gelesen werden' }); continue; }
-        if (hasInvalidEmail(parsed.emails)) { errors.push({ line: i + 1, message: 'ungültige E-Mail-Adresse' }); continue; }
-        if (hasInvalidPhone(parsed.phones)) { errors.push({ line: i + 1, message: 'ungültige Telefonnummer' }); continue; }
-        if (isInvalidBirthday(parsed.birthday)) { errors.push({ line: i + 1, message: 'ungültiger Geburtstag' }); continue; }
         try {
-          await createContact(addressbookId, {
-            fn: parsed.fn, given_name: parsed.given_name, family_name: parsed.family_name,
-            org: parsed.org, title: parsed.title, birthday: parsed.birthday, note: parsed.note,
-            phones: parsed.phones, emails: parsed.emails, addresses: parsed.addresses,
-          });
+          await createContact(addressbookId, {}, cards[i]);
           created++;
         } catch (err) {
-          console.error(err);
+          console.error('Transfer operation failed');
           errors.push({ line: i + 1, message: 'Kontakt konnte nicht angelegt werden' });
         }
       }
@@ -213,7 +208,7 @@ router.post('/import', async (req: AuthedRequest, res: Response) => {
           });
           created++;
         } catch (err) {
-          console.error(err);
+          console.error('Transfer operation failed');
           errors.push({ line: i + 1, message: 'Kontakt konnte nicht angelegt werden' });
         }
       }
@@ -221,9 +216,9 @@ router.post('/import', async (req: AuthedRequest, res: Response) => {
 
     res.json({ created, errors });
   } catch (err) {
-    console.error(err);
+    console.error('Transfer operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 export default router;

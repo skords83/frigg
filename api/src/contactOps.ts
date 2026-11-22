@@ -1,6 +1,9 @@
 import { query, pool } from './db';
-import { getClientForAddressbook, labelToVCardType } from './carddav';
+import { getClientForAddressbook } from './carddav';
 import type { ContactRow } from './types';
+import { encodeText, foldLine, patchDocument, projectDocument, type EditableFields } from './vcardDocument';
+import { DavError } from './davSafety';
+import { readGroup } from './groupCard';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -20,6 +23,8 @@ const BIRTHDAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 export function isInvalidBirthday(birthday: unknown): boolean {
   if (typeof birthday !== 'string' || !birthday.trim()) return false;
+  const partial = birthday.trim().match(/^--(\d{2})-?(\d{2})$/);
+  if (partial) return isInvalidBirthday(`2000-${partial[1]}-${partial[2]}`);
   const m = birthday.trim().match(BIRTHDAY_RE);
   if (!m) return true;
   const year = Number(m[1]);
@@ -36,55 +41,23 @@ export function withoutEmptyPhones(phones: unknown): { label: string; value: str
   return (phones as { label: string; value: string }[]).filter((p) => p?.value?.trim());
 }
 
-export interface ContactFields {
-  fn?: string;
-  given_name?: string;
-  family_name?: string;
-  org?: string | null;
-  title?: string | null;
-  birthday?: string | null;
-  note?: string | null;
-  phones?: Array<{ label: string; value: string }>;
-  emails?: Array<{ label: string; value: string }>;
-  addresses?: Array<{ label: string; street: string; city: string; zip: string; state?: string; country?: string }>;
-}
+export type ContactFields = EditableFields;
 
 export function buildVCard(fields: ContactFields & { uid: string }): string {
-  const lines: string[] = ['BEGIN:VCARD', 'VERSION:4.0', `UID:${fields.uid}`];
-
-  const fn = fields.fn ?? `${fields.given_name ?? ''} ${fields.family_name ?? ''}`.trim();
-  lines.push(`FN:${fn}`);
-  lines.push(`N:${fields.family_name ?? ''};${fields.given_name ?? ''};;;`);
-
-  if (fields.org) lines.push(`ORG:${fields.org}`);
-  if (fields.title) lines.push(`TITLE:${fields.title}`);
-  if (fields.birthday) lines.push(`BDAY:${fields.birthday}`);
-  if (fields.note) lines.push(`NOTE:${fields.note.replace(/\n/g, '\\n')}`);
-
-  for (const p of fields.phones ?? []) {
-    const type = labelToVCardType(p.label);
-    lines.push(`TEL;TYPE=${type}:${p.value}`);
-  }
-  for (const e of fields.emails ?? []) {
-    const type = labelToVCardType(e.label);
-    lines.push(`EMAIL;TYPE=${type}:${e.value}`);
-  }
-  for (const a of fields.addresses ?? []) {
-    const type = labelToVCardType(a.label);
-    lines.push(`ADR;TYPE=${type}:;;${a.street};${a.city};${a.state ?? ''};${a.zip};${a.country ?? ''}`);
-  }
-
-  lines.push('END:VCARD');
-  return lines.join('\r\n');
+  const base = ['BEGIN:VCARD', 'VERSION:4.0', `UID:${encodeText(fields.uid)}`, 'FN:', 'N:;;;;', 'END:VCARD'].map(foldLine).join('\r\n') + '\r\n';
+  return patchDocument(base, { ...fields, fn: fields.fn ?? `${fields.given_name ?? ''} ${fields.family_name ?? ''}`.trim() });
 }
 
 // Shared by POST /api/contacts and the bulk vCard/CSV importer: builds a vCard,
 // pushes it to the CardDAV server for the target addressbook, and inserts the
 // resulting row.
-export async function createContact(addressbookId: string, fields: ContactFields): Promise<ContactRow> {
-  const uid = crypto.randomUUID();
+export async function createContact(addressbookId: string, fields: ContactFields, originalVCard?: string): Promise<ContactRow> {
+  const uid = originalVCard ? projectDocument(originalVCard).uid : crypto.randomUUID();
+  if ((await query('SELECT 1 FROM contacts WHERE vcard_uid = $1 AND addressbook_id = $2', [uid, addressbookId])).length) throw new DavError(409, 'uid_exists');
+  const internalId = crypto.randomUUID();
   const phones = withoutEmptyPhones(fields.phones);
-  const rawVcard = buildVCard({ ...fields, uid, phones });
+  const rawVcard = originalVCard ?? buildVCard({ ...fields, uid, phones });
+  const parsed = projectDocument(rawVcard);
 
   const [book] = await query<{ url: string }>('SELECT url FROM addressbooks WHERE id = $1', [addressbookId]);
   if (!book) throw new Error('address book not found');
@@ -93,29 +66,29 @@ export async function createContact(addressbookId: string, fields: ContactFields
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result: any = await client.createVCard({
     addressBook: { url: book.url },
-    filename: `${uid}.vcf`,
+    filename: `${encodeURIComponent(uid)}.vcf`,
     vCardString: rawVcard,
   });
   const etag = result.headers.get('etag') ?? '';
 
   await pool.query(
     `INSERT INTO contacts
-       (uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
+       (uid, vcard_uid, resource_kind, addressbook_id, href, etag, fn, given_name, family_name, org, title,
         birthday, note, photo_data_uri, phones, emails, addresses, raw_vcard)
-     VALUES ($1,$2,$15,$3,$4,$5,$6,$7,$8,$9,$10,NULL,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
+     VALUES ($17,$1,$18,$2,$15,$3,$4,$5,$6,$7,$8,$9,$10,$16,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
     [
       uid, addressbookId, etag,
-      fields.fn ?? `${fields.given_name ?? ''} ${fields.family_name ?? ''}`.trim(),
-      fields.given_name ?? '', fields.family_name ?? '', fields.org ?? null, fields.title ?? null,
-      fields.birthday ?? null, fields.note ?? null,
-      JSON.stringify(phones ?? []),
-      JSON.stringify(fields.emails ?? []),
-      JSON.stringify(fields.addresses ?? []),
+      parsed.fn, parsed.given_name, parsed.family_name, parsed.org, parsed.title,
+      parsed.birthday, parsed.note,
+      JSON.stringify(parsed.phones), JSON.stringify(parsed.emails), JSON.stringify(parsed.addresses),
       rawVcard,
-      new URL(`${uid}.vcf`, book.url).href,
+      new URL(`${encodeURIComponent(uid)}.vcf`, book.url).href,
+      parsed.photo_data_uri,
+      internalId,
+      readGroup(rawVcard) ? 'group' : 'contact',
     ]
   );
 
-  const [created] = await query<ContactRow>('SELECT * FROM contacts WHERE uid = $1', [uid]);
+  const [created] = await query<ContactRow>('SELECT * FROM contacts WHERE uid = $1', [internalId]);
   return created;
 }
