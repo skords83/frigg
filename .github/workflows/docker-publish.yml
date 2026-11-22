@@ -3,6 +3,8 @@ name: Build & Push Docker Images
 on:
   push:
     branches: [main]
+  # Manual runs build and publish images without touching production.
+  workflow_dispatch:
 
 jobs:
   build:
@@ -43,6 +45,7 @@ jobs:
           no-cache: true
 
       - name: Copy compose.yaml to Sleipnir
+        if: github.event_name == 'push'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -52,6 +55,7 @@ jobs:
           target: /var/lib/docker/volumes/docker_dockhand_data/_data/stacks/VPS/frigg/
 
       - name: Redeploy on Sleipnir
+        if: github.event_name == 'push'
         uses: appleboy/ssh-action@v1.0.3
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
