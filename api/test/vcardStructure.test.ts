@@ -17,9 +17,6 @@ const rejected: Array<[string, unknown, VCardStructureCategory]> = [
   ['double CR', card().replace('\r\n', '\r\r\n'), 'bare_cr'],
   ['initial space', ' ' + card(), 'orphan_fold'],
   ['initial tab', '\t' + card(), 'orphan_fold'],
-  ['leading empty line', '\r\n' + card(), 'empty_line'],
-  ['internal empty line', card('\r\n'), 'empty_line'],
-  ['folded empty line', card('\r\n \r\n'), 'empty_line'],
   ['missing property before colon', card(':synthetic\r\n'), 'empty_property_name'],
   ['unclosed parameter quote', card('X-TEST;X-P="synthetic:value\r\n'), 'unclosed_header_quote'],
   ['no separator', card('X-TEST\r\n'), 'missing_separator'],
@@ -60,17 +57,25 @@ for (const [name, raw, subcategory] of rejected) {
       return true;
     });
     assert.equal(parseVCard(raw as string), null);
+    if (typeof raw === 'string' && subcategory !== 'orphan_fold') {
+      assert.throws(() => readDocument('\r\n' + raw), { subcategory });
+    }
   });
 }
 
 test('every structural subcategory is exercised; first failing check wins', () => {
-  assert.deepEqual([...new Set(rejected.map(row => row[2]))].sort(), [...vcardStructureCategories].sort());
+  assert.deepEqual([...new Set(rejected.map(row => row[2]))].sort(), vcardStructureCategories.filter(category => category !== 'empty_line').sort());
   assert.throws(() => readDocument('\uFEFF' + card('NOTE:a\0b\r')), { subcategory: 'nul_character' });
   assert.throws(() => readDocument('\uFEFF' + card('NOTE:a\rb\r\n')), { subcategory: 'bare_cr' });
   assert.throws(() => readDocument('X-TEST:x\r\n' + card('bad_name:x\r\n')), { subcategory: 'invalid_property_name' });
 });
 
 const accepted: Array<[string, string]> = [
+  ['leading empty line', '\r\n' + card()],
+  ['internal empty lines', card('\r\n\r\n')],
+  ['folded empty line', card('\r\n \r\n')],
+  ['empty properties', card('NOTE:\r\nTITLE:\r\n')],
+
   ['CRLF', card()], ['LF', card().replace(/\r\n/g, '\n')],
   ['mixed CRLF/LF', card().replace('VERSION:4.0\r\n', 'VERSION:4.0\n')],
   ['no final newline', card().trimEnd()], ['trailing empty lines', card() + '\r\n\r\n'],
@@ -91,7 +96,7 @@ const accepted: Array<[string, string]> = [
   ['Apple group', card('X-ADDRESSBOOKSERVER-KIND:group\r\n', '3.0')],
 ];
 for (const [name, raw] of accepted) {
-  test(`unchanged structural acceptance: ${name}`, () => {
+  test(`structural acceptance: ${name}`, () => {
     assert.ok(readDocument(raw).length > 0);
     // The full parser must preserve input; no repair/normalization introduced here.
     assert.equal(parseVCard(raw)?.raw_vcard, raw);
@@ -116,14 +121,14 @@ test('valid BEGIN:VCARD text and escaped AGENT reach the secondary parser, which
 
 test('version and UID errors remain separate from invalid_vcard', () => {
   for (const raw of [card('', '2.1'), card().replace('VERSION:4.0\r\n', ''), card('VERSION:4.0\r\n')]) {
-    assert.throws(() => readDocument(raw), { code: 'unsupported_vcard_version' });
+    assert.throws(() => readDocument('\r\n' + raw.replace('END:VCARD', '\r\nEND:VCARD')), { code: 'unsupported_vcard_version' });
   }
   for (const raw of [card('UID:duplicate\r\n'), card().replace('UID:synthetic', 'UID:'), card().replace('UID:synthetic\r\n', '')]) {
-    assert.throws(() => readDocument(raw), { code: 'invalid_uid' });
+    assert.throws(() => readDocument('\r\n' + raw.replace('END:VCARD', '\r\nEND:VCARD')), { code: 'invalid_uid' });
   }
 });
 
-test('read-only scan emits only allowlisted structural subcategories and keeps 122/113/9 totals', async () => {
+test('read-only scan accepts all 122 resources including nine with blank lines (5/2/2)', async () => {
   const log = console.log, oldKey = process.env.SYNC_DIAGNOSTICS_KEY;
   const output: string[] = [];
   console.log = line => { output.push(String(line)); };
@@ -138,17 +143,17 @@ test('read-only scan emits only allowlisted structural subcategories and keeps 1
           return { raw: (i < invalid ? card('\r\n') : card()).replace('UID:synthetic', `UID:synthetic-${i}`), etag: '"synthetic"' };
         },
       }, { url }, `book${index}`, []);
-      assert.equal(failures, invalid);
+      assert.equal(failures, 0);
     }
     const events = output.map(line => JSON.parse(line));
     const summaries = events.filter(e => e.type === 'book_summary');
     assert.equal(summaries.reduce((n, e) => n + e.listed_resources, 0), 122);
-    assert.equal(summaries.reduce((n, e) => n + e.eligible_resources, 0), 113);
-    assert.deepEqual(summaries.map(e => e.parser_errors_by_subcategory), [{ empty_line: 5 }, { empty_line: 2 }, { empty_line: 2 }]);
+    assert.equal(summaries.reduce((n, e) => n + e.eligible_resources, 0), 122);
+    assert.deepEqual(summaries.map(e => e.parser_errors_by_subcategory), [{}, {}, {}]);
     assert.ok(summaries.every(e => e.successful_upserts === 0 && e.markers === 'unchanged'));
     const failures = events.filter(e => e.type === 'failure');
-    assert.equal(failures.length, 9);
-    assert.ok(failures.every(e => e.code === 'invalid_vcard' && e.subcategory === 'empty_line' && e.phase === 'parse' && e.reason === 'document_parse_failed' && /^[0-9a-f]{64}$/.test(e.resource_ref)));
+    assert.equal(failures.length, 0);
+    assert.ok(summaries.every(e => Object.keys(e.errors_by_category).length === 0));
     const d = new Diagnostics('sensitive-book');
     d.failure('document_parse_failed', 'parse', 'https://sensitive.invalid/resource', 'invalid_vcard', 'sensitive-unknown');
     assert.equal(JSON.parse(output.at(-1)!).subcategory, undefined);
@@ -161,7 +166,7 @@ test('read-only scan emits only allowlisted structural subcategories and keeps 1
   }
 });
 
-test('native adapter passes structurally invalid cards unchanged to the parser', async () => {
+test('native adapter preserves input including blank lines', async () => {
   for (const raw of ['\uFEFF' + card(), card('\r\n'), card().replace(/\r\n/g, '\r')]) {
     const client = withNativeCards({ propfind: async () => [{ ok: true, status: 200, props: { addressData: { _cdata: raw }, getetag: '"synthetic"' } }] });
     assert.equal((await client.readVCard('https://synthetic.invalid/book/card')).raw, raw);
@@ -177,9 +182,32 @@ test('actual tsdav XML decoding trims outer whitespace/BOM but preserves interio
       }) });
       const native = await client.readVCard('https://synthetic.invalid/book/card');
       assert.equal(native.raw, raw.trim());
-      if (raw === card('\r\n')) assert.throws(() => readDocument(native.raw), { subcategory: 'empty_line' });
-      else if (!raw.includes('\n')) assert.throws(() => readDocument(native.raw), { subcategory: 'bare_cr' });
+      if (!raw.includes('\n')) assert.throws(() => readDocument(native.raw), { subcategory: 'bare_cr' });
       else assert.ok(readDocument(native.raw).length > 0);
     }
   }
+});
+
+test('remaining structure errors retain safe diagnostic categories in both modes', async () => {
+  const log = console.log;
+  const events: Array<Record<string, any>> = [];
+  console.log = line => { events.push(JSON.parse(String(line))); };
+  try {
+    for (const mode of ['read_only', 'sync'] as const) {
+      await diagnosticBook('synthetic', async () => {
+        assert.equal(parseVCard(card('\r\nX-BROKEN\r\n')), null);
+        assert.equal(parseVCard(card('\r\nUID:\r\n')), null);
+      }, mode);
+      const failures = events.filter(e => e.type === 'failure');
+      assert.equal(failures[0].reason, 'document_parse_failed');
+      assert.equal(failures[0].code, 'invalid_vcard');
+      assert.equal(failures[0].subcategory, 'missing_separator');
+      assert.equal(failures[1].code, 'invalid_uid');
+      assert.equal(failures[1].subcategory, undefined);
+      const summary = events.find(e => e.type === 'book_summary')!;
+      assert.deepEqual(summary.parser_errors_by_subcategory, { missing_separator: 1 });
+      assert.deepEqual(summary.errors_by_category, { document_parse_failed: 2 });
+      events.length = 0;
+    }
+  } finally { console.log = log; }
 });

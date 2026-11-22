@@ -1,14 +1,25 @@
-# Neun reproduzierbare Parser-Ablehnungen genauer eingrenzen
+# Gezielte Korrektur der neun Leerzeilen-Ablehnungen
 
-Aus dem gemeldeten Leselauf ist bekannt: 122 gelistete Ressourcen, 113 bestandene
-Prüfungen, neun `document_parse_failed` / `invalid_vcard`, verteilt auf drei Bücher
-mit 5/2/2 Fehlern. Damit ist die eigene Dokumentprüfung betroffen, nicht der danach
-aufgerufene `vcf`-Parser. Die konkrete strukturelle Ursache ist noch unbekannt.
+Nachgewiesener Lesebefund: 122 Ressourcen in drei Adressbüchern, davon 113
+akzeptiert und neun ausschließlich mit `document_parse_failed` / `invalid_vcard` /
+`empty_line` abgelehnt (5/2/2). Andere Fehlerkategorien wurden nicht beobachtet.
 
-Der Folgecommit ergänzt ausschließlich Diagnosemetadaten. Er verändert weder
-Annahme-/Ablehnungsentscheidungen noch Parserreihenfolge, Rohdaten, Persistenz,
-DAV-Zugriffe oder Marker. Status 422, Code/Message `invalid_vcard` und der
-`parseVCard()`-Rückgabewert `null` bleiben gleich. Es gibt keine Reparatur.
+`readDocument()` entfaltet weiterhin zuerst die physischen Zeilen und überspringt
+anschließend ausschließlich tatsächlich leere logische Zeilen (`unfolded === ''`).
+Kein `trim()`, keine Entfernung physischer Leerzeilen vor der Faltung: Andernfalls
+könnte eine Fortsetzung einer falschen Property zugeordnet werden. Genau ein
+Faltungs-Space/Tab wird entfernt; weitere Leerzeichen bleiben Inhalt. `NOTE:` und
+andere leere Property-Werte bleiben Properties. Roh-vCards bleiben beim Lesen und
+bei unveränderten Patches unverändert; bei tatsächlichen lokalen Dokumentedits
+werden ignorierte Leerzeilen nicht serialisiert, unveränderte Content-Lines samt
+Faltung und Leerzeichen bleiben erhalten.
+
+Regulärer Full-/Delta-Sync und separater Lesemodus verwenden dieselbe Korrektur über
+`parseVCard()` → `projectDocument()` → `readDocument()`. Übrige Struktur-, Versions-,
+UID- und Konfliktprüfungen sowie Schreibsperren und Diagnosefunktionen bleiben
+unverändert. Synthetische Regressionstests bilden die Verteilung 5/2/2 nach und
+verlangen nun 122 bestandene Prüfungen, null Fehler, null Upserts und unveränderte
+Marker. Das ist noch kein erneuter Lauf gegen die produktiven Ressourcen.
 
 ## Verarbeitung vor dem Fehler
 
@@ -23,8 +34,9 @@ DAV-Zugriffe oder Marker. Status 422, Code/Message `invalid_vcard` und der
 3. Friggs Adapter reicht `addressData._cdata ?? addressData` als String weiter.
    `parseVCard()` ruft zuerst `projectDocument()` / `readDocument()` auf.
    `splitVCards()` gehört zum Dateiimport und wird hier nicht benutzt.
-4. Erst nach erfolgreicher Projektion folgt `VCF.parse()` mit der bereits
-   vorhandenen CRLF-Anpassung für dessen Eingabe. Eine dortige Exception hätte
+4. Erst nach erfolgreicher Projektion folgt `VCF.parse()` mit den akzeptierten Content-Lines samt originaler Faltung
+   und CRLF-Zeilentrennern. So lehnt auch der sekundäre Check keine führenden
+   leeren logischen Zeilen ab; die gespeicherte Roh-vCard bleibt unverändert. Eine dortige Exception hätte
    `reason: vcf_parse_failed`, nicht die hier beobachtete Fehlerkategorie.
 
 Die Unterkategorie beschreibt den Parser-Eingabestring nach XML-Decoding, nicht
@@ -34,10 +46,10 @@ aber im regulären nativen Lesepfad bereits durch die vorgeschaltete Prüfung ge
 
 ## Sämtliche invalid_vcard-Bedingungen
 
-Die Reihenfolge entspricht dem bisherigen Parser: globale Eingabeprüfung,
+Die Reihenfolge der verbleibenden Prüfungen entspricht dem bisherigen Parser: globale Eingabeprüfung,
 Zeilenfaltung, sämtliche Content-Lines, anschließend Dokumentgrenzen. Es wird pro
 Ressource nur die **erste** verletzte Bedingung erfasst, keine vollständige Liste
-aller möglichen Defekte. Die neue Zusatzinformation lautet `subcategory`.
+aller möglichen Defekte. Die Zusatzinformation lautet `subcategory`.
 
 | Unterkategorie | Konkrete Bedingung |
 | --- | --- |
@@ -45,7 +57,7 @@ aller möglichen Defekte. Die neue Zusatzinformation lautet `subcategory`.
 | `nul_character` | Mindestens ein NUL-Zeichen irgendwo in der Eingabe. |
 | `bare_cr` | Mindestens ein CR ohne unmittelbar folgendes LF; auch CR-only oder CRCRLF. |
 | `orphan_fold` | Physische Zeile beginnt mit ASCII-Space/Tab, aber es gibt noch keine vorherige logische Zeile. |
-| `empty_line` | Nach dem bisherigen Entfalten ist eine logische Zeile leer. Betrifft führende/innere Leerzeilen; abschließende leere Zeilen werden bereits vorher entfernt. |
+| `empty_line` | Historische Kategorie, weiterhin allowlisted. Leere logische Zeilen werden jetzt toleriert; der Parser emittiert diese Kategorie nicht mehr. |
 | `empty_property_name` | Erster nicht zitierter Doppelpunkt steht an Position 0. |
 | `unclosed_header_quote` | Kein Trenn-Doppelpunkt außerhalb von Anführungszeichen gefunden und Quote-Zustand bleibt offen. Das ist eine lexikalische Diagnose, keine vollständige Parametervalidierung. |
 | `missing_separator` | Kein nicht zitierter Doppelpunkt gefunden, Zeile nicht leer und Quote-Zustand geschlossen. Möglich bei unmarkierter Fortsetzung oder Legacy-Softbreak. |
@@ -91,10 +103,10 @@ Diese beiden Kategorien erklären die aktuell gemeldeten neun `invalid_vcard` ni
 - **Toleranzunterschied zu Sabre:** In
   [sabre/vobject 4.6.1, MimeDir](https://github.com/sabre-io/vobject/blob/4.6.1/lib/Parser/MimeDir.php)
   entfernt `parseDocument()` ein BOM und ergänzt bei EOF intern ein END;
-  `readLine()` überspringt Leerzeilen. Frigg lehnt entsprechende Eingaben ab.
+  `readLine()` überspringt Leerzeilen. Frigg toleriert jetzt ebenfalls leere logische Zeilen; BOM- und END-Prüfungen bleiben strikt.
   Die Quelle ist auch im lokalen synthetischen Baïkal-Testpaket vorhanden.
   Das ist Codebefund, kein Test gegen die produktive Baïkal-Version und kein Beweis
-  für die Ursache der neun Ressourcen. Der Sabre-CardDAV-Pfad validiert nach dem
+  für sonstige Fehlerursachen. Der Sabre-CardDAV-Pfad validiert nach dem
   Lesen zusätzlich und kann je nach Handling Reparaturen vornehmen
   ([Plugin 4.7.1](https://github.com/sabre-io/dav/blob/4.7.1/lib/CardDAV/Plugin.php)).
   Akzeptanz durch einen toleranten Server ist nicht gleich RFC-Konformität.
@@ -106,7 +118,7 @@ Diese beiden Kategorien erklären die aktuell gemeldeten neun `invalid_vcard` ni
   [RFC 2426 §3.5.4](https://www.rfc-editor.org/rfc/rfc2426.html#section-3.5.4) beschrieben.
   Die Tests halten diesen bestehenden Fehler ausdrücklich fest. Er ergibt
   `vcf_parse_failed`, kann also die neun gemeldeten Fehler nicht erklären und wird
-  in diesem Diagnosepatch nicht korrigiert.
+  in diesem Leerzeilenpatch nicht korrigiert.
 
 ## Mit dem bestehenden Diagnosecontainer erneut lesen
 
@@ -126,7 +138,7 @@ bleiben. Beim in [sync-diagnostics.md](sync-diagnostics.md) dokumentierten Conta
 wird `api/dist` read-only eingebunden: derselbe `docker run`-Befehl nutzt nach dem
 Build automatisch den neuen Code. Ausschließlich `/app/api/dist/diagnoseSync.js`
 starten und eine **neue** Logdatei verwenden, beispielsweise
-`/secure/frigg-diagnose-structure.jsonl`. Nicht `dist/index.js`, den API-Service,
+`/secure/frigg-diagnose-empty-lines.jsonl`. Nicht `dist/index.js`, den API-Service,
 normalen Sync oder Migrationen starten.
 
 Falls der tatsächlich verwendete Diagnosecontainer die JS-Dateien im Image statt
@@ -140,15 +152,15 @@ Buchweise Summen einschließlich Unterkategorien:
 jq 'select(.type == "book_summary") |
   {book_ref,listed_resources,eligible_resources,successful_upserts,
    errors_by_category,parser_errors_by_subcategory,markers}' \
-  /secure/frigg-diagnose-structure.jsonl
+  /secure/frigg-diagnose-empty-lines.jsonl
 ```
 
-Die neun Ressourcen mit ihrer jeweiligen ersten strukturellen Ursache:
+Eventuell verbleibende Ressourcen mit ihrer ersten strukturellen Ursache:
 
 ```sh
 jq 'select(.type == "failure" and .reason == "document_parse_failed"
   and .code == "invalid_vcard") | {book_ref,resource_ref,subcategory}' \
-  /secure/frigg-diagnose-structure.jsonl
+  /secure/frigg-diagnose-empty-lines.jsonl
 ```
 
 Gesamthäufigkeit pro Unterkategorie:
@@ -157,18 +169,22 @@ Gesamthäufigkeit pro Unterkategorie:
 jq -s '[.[] | select(.type == "failure" and .reason == "document_parse_failed"
   and .code == "invalid_vcard")] | group_by(.subcategory) |
   map({subcategory: .[0].subcategory, count: length})' \
-  /secure/frigg-diagnose-structure.jsonl
+  /secure/frigg-diagnose-empty-lines.jsonl
 ```
 
-Bei unverändertem Remote-Zustand sollten weiterhin 122/113/9 und 5/2/2 erscheinen,
-mit `successful_upserts: 0` und `markers: unchanged`. Fehlende `subcategory` bei
-`invalid_vcard` weist auf alte Diagnose-Artefakte oder einen unerwarteten Fehlerpfad
-hin. Es werden ausschließlich Enum-Werte ausgegeben, keine Zeilennummern,
-Property-Namen, Zeilenausschnitte oder Werte. Die Unterkategorien sind zusätzlich
-zur Typprüfung zur Laufzeit allowlisted. Auch der neue Summenzähler enthält nur
-diese festen Schlüssel. Keine Roh-vCards, Namen, Nummern, E-Mails, UIDs, URLs,
-Credentials oder Tokens anfordern oder teilen.
+Bei unverändertem Remote-Zustand ist das Ziel **122 gelistet / 122 akzeptiert / 0
+Fehler**, sofern nach der Leerzeilenkorrektur keine weiteren Defekte sichtbar
+werden. In allen drei Büchern müssen `successful_upserts: 0`, `markers: unchanged`,
+`errors_by_category: {}` und `parser_errors_by_subcategory: {}` stehen; Prozess-
+Exitcode 0. Ein erneutes `empty_line` deutet auf alte Diagnose-Artefakte hin.
+Andere Fehler werden weiterhin nach ihrer ersten verletzten Bedingung klassifiziert,
+insbesondere `invalid_uid`, `unsupported_vcard_version`, strukturelle Unterkategorien,
+`vcf_parse_failed` und Konfliktkategorien. Ein vorher verdeckter Defekt ist separat
+zu untersuchen; die Korrektur lockert dafür keine weiteren Prüfungen.
 
-Erst anhand dieser Ausgabe wird eine gezielte Korrektur bewertet. Insbesondere
-keine Leerzeilen entfernen, BOMs strippen, CR ersetzen oder Parserregeln lockern,
-bevor der tatsächliche Befund und dessen sichere Behandlung feststehen.
+Es werden ausschließlich Enum-Werte ausgegeben, keine Zeilennummern,
+Property-Namen, Zeilenausschnitte oder Werte. Keine Roh-vCards, Namen, Nummern,
+E-Mails, UIDs, URLs, Credentials oder Tokens anfordern oder teilen.
+
+Der Lauf ist hier nur vorbereitet. Kein Deployment, kein Start der produktiven API,
+keine Migrationen, keine Änderungen an Baïkal oder produktiven Kontakten.

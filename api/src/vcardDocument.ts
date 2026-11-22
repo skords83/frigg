@@ -46,7 +46,7 @@ export function foldLine(line: string): string {
 }
 
 export function readDocument(raw: string): ContentLine[] {
-  // Preserve the original check order and acceptance rules; classify only rejections.
+  // Keep structural checks strict; tolerate only empty logical lines after unfolding.
   if (typeof raw !== 'string') throw new VCardStructureError('non_string_input');
   if (raw.includes('\0')) throw new VCardStructureError('nul_character');
   if (/\r(?!\n)/.test(raw)) throw new VCardStructureError('bare_cr');
@@ -60,16 +60,19 @@ export function readDocument(raw: string): ContentLine[] {
     } else logical.push(line);
   }
   const occurrences = new Map<string, number>();
-  const lines = logical.map((original, index) => {
-    const unfolded = original.replace(/\r\n[ \t]/g, '');
+  // Unfold before filtering: removing physical blank lines first could attach a
+  // continuation to the wrong property. Never trim meaningful spaces or tabs.
+  const content = logical.map(original => ({
+    original, unfolded: original.replace(/\r\n[ \t]/g, ''),
+  })).filter(line => line.unfolded !== '');
+  const lines = content.map(({ original, unfolded }, index) => {
     let quoted = false, colon = -1;
     for (let i = 0; i < unfolded.length; i++) {
       if (unfolded[i] === '"') quoted = !quoted;
       if (unfolded[i] === ':' && !quoted) { colon = i; break; }
     }
     if (colon < 1) {
-      throw new VCardStructureError(unfolded === '' ? 'empty_line'
-        : colon === 0 ? 'empty_property_name'
+      throw new VCardStructureError(colon === 0 ? 'empty_property_name'
         : quoted ? 'unclosed_header_quote' : 'missing_separator');
     }
     const header = unfolded.slice(0, colon), value = unfolded.slice(colon + 1);

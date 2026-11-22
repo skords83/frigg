@@ -1,7 +1,7 @@
 import { diagnostics, diagnosticStep } from './syncDiagnostics';
 import { createDAVClient } from 'tsdav';
 import VCF from 'vcf';
-import { projectDocument } from './vcardDocument';
+import { projectDocument, readDocument } from './vcardDocument';
 import { VCardStructureError } from './vcardStructureError';
 import { DavError, requireEtag, guardedDavFetch, resourceUrl } from './davSafety';
 import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
@@ -156,8 +156,10 @@ export function parseVCard(raw: string, href?: string): ParsedCard | null {
   try {
     // Preserve the original syntax; vcf remains a secondary interoperability check.
     const projected = projectDocument(raw);
+    // Use the same accepted content lines for the secondary check; keep raw_vcard untouched.
+    const content = readDocument(raw).map(line => line.original).join('\r\n') + '\r\n';
     phase = 'vcf_parse_failed';
-    VCF.parse(raw.replace(/\r?\n/g, '\r\n'));
+    VCF.parse(content);
     return projected;
   } catch (err) {
     diagnostics()?.failure(phase, 'parse', href, err instanceof DavError ? err.code : undefined,
