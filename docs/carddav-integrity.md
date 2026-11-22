@@ -669,3 +669,9 @@ beseitigt werden. Keine pauschale Sicherheits- oder Kompatibilitätsfreigabe.
 
 Die CI des erweiterten Branches wird nach dem Push separat geprüft; der erfolgreiche
 Ausgangslauf #12 allein bestätigt nicht die neuen PostgreSQL-16-Tests.
+
+CI-Erstlauf der Ergänzungen [#14](https://github.com/skords83/frigg/actions/runs/44995940181):
+alle bisherigen Prüfungen bestanden, native Suite noch nicht gestartet. Ursache:
+`ubuntu-latest` lieferte Ubuntu 26.04 ohne PostgreSQL-16-Paket. Der Test-Runner
+ist deshalb auf Ubuntu 24.04 mit PostgreSQL 16 fixiert; kein Anwendungsfehler.
+Auch die unveränderten Heads von PR #1–#4 haben erfolgreiche CI-Läufe (#2/#4/#6/#8).
