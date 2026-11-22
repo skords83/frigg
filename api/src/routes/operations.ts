@@ -4,7 +4,7 @@ import type { AuthedRequest } from '../auth/middleware';
 import { canAccessAddressbook } from '../auth/access';
 import type { ContactRow } from '../types';
 import { readRemoteContact, publicEditContact } from '../remoteContact';
-import { getClientForAddressbook } from '../carddav';
+import { getClientForAddressbook, requireDavPrivilege } from '../carddav';
 import { DavError, requireEtag } from '../davSafety';
 import { projectDocument, readDocument } from '../vcardDocument';
 import { mergePreview, type MergeChoices } from '../mergeVCard';
@@ -82,6 +82,8 @@ router.post('/preview', withDavLock(async (req,res) => {
       // a referenced duplicate needs a separate explicit membership operation.
       result=mergePreview(target.raw,source.raw).raw;
     }
+    await requireDavPrivilege(await getClientForAddressbook(source.book),source.bookUrl,'unbind');
+    await requireDavPrivilege(await getClientForAddressbook(target.book),req.body.kind==='move'?target.bookUrl:target.url,req.body.kind==='move'?'bind':'writeContent');
     await assertUnreferenced(source);
     const plan = {source,target,result};
     const [op] = await query<StoredOperation>('INSERT INTO contact_operations(owner_id,kind,source_uid,target_uid,plan) VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING *',[req.user!.id,req.body.kind,source.id,target.id,JSON.stringify(plan)]);

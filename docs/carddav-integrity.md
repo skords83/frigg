@@ -313,8 +313,9 @@ Die Sammlungsliste von tsdav kann HTTP-/XML-Fehler in ein leeres Ergebnis umform
 Frigg verwendet deshalb eine geprüfte Sammlungsliste und native Einzelressourcen.
 HTTP-Fehler, ungültige XML-Antworten, verschwundene Ressourcen und fehlende starke
 ETags brechen ab; sie dürfen keinen erfolgreichen leeren Abgleich auslösen.
-Auch Request-Objekte durchlaufen die Schreibbedingungsprüfung. Referenzen beim
-Move/Merge berücksichtigen zusätzlich Ressourcen-URLs und UUID-Großschreibung.
+Auch Request-Objekte durchlaufen die Schreibbedingungsprüfung. Move-/Merge-Vorschauen prüfen zusätzlich explizite Serverrechte für Anlage, Änderung
+und Entfernen; fehlende oder nicht ausgewiesene Rechte blockieren die Vorschau.
+Referenzen beim Move/Merge berücksichtigen zusätzlich Ressourcen-URLs und UUID-Großschreibung.
 
 Unter 900 px sind die vorhandenen drei Bereiche einzeln über Navigation/Kontakte/
 Details erreichbar. Der Desktop bleibt dreispaltig. Verschieben ist auf Touchgeräten
@@ -326,7 +327,7 @@ Lokale Gruppenfehler loggen keine vollständigen Datenbankfehlermeldungen mehr.
 
 ### Letzter lokaler Teststand
 
-- `npm test`: **68 Tests erfolgreich**, einschließlich Migrationen, Parser,
+- `npm test`: **69 Tests erfolgreich**, einschließlich Migrationen, Parser,
   bedingtem Transport, Sync-Abbrüchen, Konfliktentscheidungen und Journallebenszyklus.
 - `npm run test:baikal` mit isoliertem Release/PHP: **erfolgreich**. Zusätzlich
   Erhalt einer unbekannten Unicode-Eigenschaft mit mehr als 12 KB durch Bearbeitung

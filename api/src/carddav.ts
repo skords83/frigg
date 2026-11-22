@@ -158,3 +158,14 @@ export function parseVCard(raw: string): ParsedCard | null {
     return null;
   }
 }
+
+/** Preview checks improve feedback; the conditional write still enforces authority. */
+export async function requireDavPrivilege(client: DAVClientInstance, url: string, privilege: 'bind'|'unbind'|'writeContent'): Promise<void> {
+  const responses = await client.propfind({url,depth:'0',props:{'d:current-user-privilege-set':{}}});
+  if (responses.length !== 1 || !responses[0].ok) throw new DavError(503,'privileges_unavailable');
+  const value = responses[0].props?.currentUserPrivilegeSet?.privilege;
+  const privileges = Array.isArray(value) ? value : value ? [value] : [];
+  if (!privileges.some((entry: Record<string,unknown>) => 'all' in entry || 'write' in entry || privilege in entry)) {
+    throw new DavError(403,'dav_forbidden');
+  }
+}

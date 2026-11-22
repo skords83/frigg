@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {withNativeCards} from '../src/carddav';
+import {withNativeCards,requireDavPrivilege} from '../src/carddav';
 import {guardedDavFetch} from '../src/davSafety';
 const raw='BEGIN:VCARD\r\nVERSION:4.0\r\nUID:test\r\nFN:Test\r\nKIND:group\r\nX-PRIVATE:unmodified\r\nEND:VCARD\r\n';
 const book={url:'https://dav.invalid/book/'};
@@ -34,4 +34,14 @@ test('Request instances cannot bypass conditional-write checks',async()=>{
   await assert.rejects(fetch(new Request(book.url,{method:'DELETE'})),{status:428});
   assert.equal(sent,false);
   await fetch(new Request(book.url,{method:'DELETE',headers:{'If-Match':'"a"'}}));assert.equal(sent,true);
+});
+
+test('operation previews require explicit server write privileges',async()=>{
+  for(const privilege of ['bind','unbind','writeContent'] as const) {
+    const client=(entry:Record<string,unknown>)=>({propfind:async()=>[{ok:true,props:{currentUserPrivilegeSet:{privilege:entry}}}]});
+    await requireDavPrivilege(client({[privilege]:{}}),book.url,privilege);
+    await requireDavPrivilege(client({write:{}}),book.url,privilege);
+    await assert.rejects(requireDavPrivilege(client({read:{}}),book.url,privilege),{status:403});
+    await assert.rejects(requireDavPrivilege(client({}),book.url,privilege),{status:403});
+  }
 });
