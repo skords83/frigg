@@ -107,3 +107,69 @@ test('import splitting ignores BEGIN:VCARD inside an escaped note', () => {
   assert.equal(cards.length, 2);
   assert.equal(projectDocument(cards[0]).note, 'BEGIN:VCARD is text');
 });
+
+for (const version of ['3.0', '4.0'] as const) {
+  for (const newline of ['\r\n', '\n']) {
+    test(`vCard ${version}: blank lines, folds and empty values (${JSON.stringify(newline)})`, () => {
+      const raw = ['', 'BEGIN:VCARD', '', `VERSION:${version}`, 'UID:blank-lines', '',
+        'FN: Synthetic ', 'NOTE: left ', '  right', '\t\ttail ', '',
+        'TITLE:', 'X-EMPTY:', '', 'X-FOLDED:one', ' two', '', 'END:VCARD', ''].join(newline);
+      const parsed = parseVCard(raw)!;
+      assert.ok(parsed);
+      assert.equal(parsed.raw_vcard, raw);
+      assert.equal(parsed.fn, ' Synthetic ');
+      assert.equal(parsed.note, ' left  right\ttail ');
+      assert.equal(parsed.title, '');
+      assert.equal(readDocument(raw).find(l => l.name === 'X-EMPTY')?.value, '');
+      assert.equal(patchDocument(raw, {}), raw);
+      const edited = patchDocument(raw, { title: 'New' });
+      for (const line of readDocument(raw).filter(l => l.name !== 'TITLE')) {
+        assert.deepEqual(readDocument(edited).find(l => l.id === line.id), line);
+      }
+    });
+  }
+}
+
+test('blank physical lines are not removed before unfolding and whitespace is not trimmed', () => {
+  const wrap = (extra: string) => 'BEGIN:VCARD\r\nVERSION:4.0\r\nUID:blank\r\nNOTE:first\r\n' + extra + 'END:VCARD\r\n';
+  assert.throws(() => readDocument(wrap('\r\n continuation\r\n')), { code: 'invalid_vcard' });
+  assert.throws(() => readDocument(wrap('\r\n  \r\n')), { code: 'invalid_vcard' });
+  assert.throws(() => readDocument(wrap('\r\n\u00a0\r\n')), { code: 'invalid_vcard' });
+  assert.throws(() => readDocument(wrap('\r\n :value\r\n')), { code: 'invalid_vcard' });
+  assert.equal(projectDocument(wrap(' \r\n')).note, 'first');
+  assert.equal(projectDocument(wrap('  \r\n')).note, 'first ');
+  assert.equal(projectDocument(wrap('\t\t\r\n')).note, 'first\t');
+});
+
+test('blank lines do not relax structure, version or UID validation', () => {
+  const valid = 'BEGIN:VCARD\r\nVERSION:4.0\r\nUID:synthetic\r\nFN:Synthetic\r\nEND:VCARD\r\n';
+  const invalid: Array<[string, string]> = [
+    ['\uFEFF' + valid, 'invalid_vcard'],
+    [valid.replace('FN:Synthetic', 'FN:a\0b'), 'invalid_vcard'],
+    [valid.replace('FN:Synthetic\r\n', 'FN:a\rb\r\n'), 'invalid_vcard'],
+    [valid.replace('FN:Synthetic', 'X-BROKEN'), 'invalid_vcard'],
+    [valid.replace('FN:Synthetic', ':value'), 'invalid_vcard'],
+    [valid.replace('FN:Synthetic', 'bad_name:value'), 'invalid_vcard'],
+    [valid.replace('FN:Synthetic', 'a.b.c:value'), 'invalid_vcard'],
+    [valid.replace('FN:Synthetic', 'X-TEST;P="unclosed:value'), 'invalid_vcard'],
+    [valid.replace('BEGIN:VCARD', 'BEGIN:OTHER'), 'invalid_vcard'],
+    [valid.replace('END:VCARD', ''), 'invalid_vcard'],
+    [valid + valid, 'invalid_vcard'],
+    [valid.replace('4.0', '2.1'), 'unsupported_vcard_version'],
+    [valid.replace('VERSION:4.0\r\n', ''), 'unsupported_vcard_version'],
+    [valid.replace('VERSION:4.0', 'VERSION:4.0\r\nVERSION:3.0'), 'unsupported_vcard_version'],
+    [valid.replace('UID:synthetic', 'UID:'), 'invalid_uid'],
+    [valid.replace('UID:synthetic\r\n', ''), 'invalid_uid'],
+    [valid.replace('UID:synthetic', 'UID:synthetic\r\nUID:duplicate'), 'invalid_uid'],
+  ];
+  for (const [raw, code] of invalid) {
+    for (const input of [raw, '\r\n' + raw]) {
+      assert.throws(() => readDocument(input), { code });
+      assert.equal(parseVCard(input), null);
+    }
+  }
+  for (const input of [' ' + valid, '\t' + valid, '', '\r\n \r\n']) {
+    assert.throws(() => readDocument(input), { code: 'invalid_vcard' });
+    assert.equal(parseVCard(input), null);
+  }
+});

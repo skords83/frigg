@@ -18,6 +18,26 @@ test('synchronization failure regression tests', async (t) => {
     return { rows: [], rowCount: collision ? 0 : 1 };
   }) as typeof pool.query;
   try {
+    await t.test('full and delta sync accept blank lines and preserve raw input', async () => {
+      const raw = card.replace('FN:Synthetic', '\r\nFN:Synthetic\r\nNOTE:left\r\n  right\r\nTITLE:');
+      for (const delta of [false, true]) {
+        statements = [];
+        const client = {
+          fetchVCards: async () => [{ url: book.url + 'synthetic', data: raw }],
+          readVCard: async () => ({ raw, etag: '"new"' }),
+          syncCollection: async () => [{ status: 200, href: '/book/synthetic', raw: { multistatus: { syncToken: 'new' } } }],
+          addressBookMultiGet: async () => [{ status: 200, href: '/book/synthetic', props: { getetag: '"new"', addressData: raw } }],
+        };
+        const result = delta
+          ? await deltaSync(client, book, 'book', 'synthetic', 'old')
+          : await fullSync(client, book, 'book', 'synthetic');
+        assert.equal(result.errors, 0);
+        assert.equal(result.synced, 1);
+        const insert = statements.find(s => s.sql.startsWith('INSERT'))!;
+        assert.ok(insert.args.includes(raw));
+        assert.ok(insert.args.includes('left right'));
+      }
+    });
     await t.test('parse failure preserves old rows and reports an error', async () => {
       statements = [];
       const result = await fullSync({ readVCard: async () => ({raw:'invalid',etag:'"x"'}), fetchVCards: async () => [{ url: book.url + 'existing', data: 'invalid', etag: '"x"' }] }, book, 'book', 'synthetic');
