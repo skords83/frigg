@@ -4,7 +4,7 @@ import type { AuthedRequest } from '../auth/middleware';
 import { canAccessAddressbook } from '../auth/access';
 import type { ContactRow } from '../types';
 import { readRemoteContact, publicEditContact } from '../remoteContact';
-import { getClientForAddressbook } from '../carddav';
+import { getClientForAddressbook, requireDavPrivilege } from '../carddav';
 import { DavError, requireEtag } from '../davSafety';
 import { projectDocument, readDocument } from '../vcardDocument';
 import { mergePreview, type MergeChoices } from '../mergeVCard';
@@ -14,7 +14,7 @@ import { withDavLock } from '../davLock';
 const router = Router();
 interface StoredOperation extends Operation { owner_id: string; last_error: string | null; plan: OperationPlan & { choices?: MergeChoices } }
 async function authorizedContact(userId: string, id: string): Promise<ContactRow> {
-  const [contact] = await query<ContactRow>('SELECT * FROM contacts WHERE uid=$1',[id]);
+  const [contact] = await query<ContactRow>("SELECT * FROM contacts WHERE uid=$1 AND resource_kind='contact'",[id]);
   if (!contact || !(await canAccessAddressbook(userId,contact.addressbook_id))) throw new DavError(404,'not_found');
   return contact;
 }
@@ -22,6 +22,16 @@ async function snapshot(contact: ContactRow): Promise<Snapshot> {
   const remote = await readRemoteContact(contact);
   const [book] = await query<{url:string}>('SELECT url FROM addressbooks WHERE id=$1',[contact.addressbook_id]);
   return { book:contact.addressbook_id, bookUrl:book.url, id:contact.uid, uid:remote.contact.vcard_uid, url:remote.url, etag:remote.contact.etag, raw:remote.contact.raw_vcard };
+}
+async function assertUnreferenced(source: Snapshot) {
+  const client = await getClientForAddressbook(source.book);
+  const cards = await client.fetchVCards({addressBook:{url:source.bookUrl},urlFilter:()=>true});
+  for (const card of cards) {
+    if (!card.url) throw new DavError(409,'membership_check_failed');
+    const native = await client.readVCard(new URL(card.url,source.bookUrl).href);
+    if (!native) throw new DavError(409,'membership_check_failed');
+    if (readDocument(native.raw).some(l=>['MEMBER','X-ADDRESSBOOKSERVER-MEMBER','RELATED'].includes(l.name) && [source.uid,`urn:uuid:${source.uid}`,source.url].some(ref=>ref===l.value||/^urn:uuid:/i.test(ref)&&ref.toLowerCase()===l.value.toLowerCase()))) throw new DavError(409,'contact_is_referenced');
+  }
 }
 async function operationFor(req: AuthedRequest): Promise<StoredOperation> {
   const [op] = await query<StoredOperation>('SELECT * FROM contact_operations WHERE id=$1 AND owner_id=$2',[req.params.id,req.user!.id]);
@@ -72,11 +82,9 @@ router.post('/preview', withDavLock(async (req,res) => {
       // a referenced duplicate needs a separate explicit membership operation.
       result=mergePreview(target.raw,source.raw).raw;
     }
-    const sourceCards = await (await getClientForAddressbook(source.book)).fetchVCards({addressBook:{url:source.bookUrl},urlFilter:()=>true});
-    for (const card of sourceCards) {
-      if (!card.data) throw new DavError(409,'membership_check_failed');
-      if (readDocument(card.data).some(l=>['MEMBER','X-ADDRESSBOOKSERVER-MEMBER','RELATED'].includes(l.name) && [source.uid,`urn:uuid:${source.uid}`].includes(l.value))) throw new DavError(409,'contact_is_referenced');
-    }
+    await requireDavPrivilege(await getClientForAddressbook(source.book),source.bookUrl,'unbind');
+    await requireDavPrivilege(await getClientForAddressbook(target.book),req.body.kind==='move'?target.bookUrl:target.url,req.body.kind==='move'?'bind':'writeContent');
+    await assertUnreferenced(source);
     const plan = {source,target,result};
     const [op] = await query<StoredOperation>('INSERT INTO contact_operations(owner_id,kind,source_uid,target_uid,plan) VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING *',[req.user!.id,req.body.kind,source.id,target.id,JSON.stringify(plan)]);
     res.status(201).json(preview(op));
@@ -121,7 +129,7 @@ router.post('/:id/execute',withDavLock(async(req,res)=>{
         if(create) await client.createVCard({addressBook:{url:snap.bookUrl},filename:snap.url.slice(snap.bookUrl.length),vCardString:raw});
         else await client.updateVCard({vCard:{url:snap.url,etag:snap.etag,data:raw}});
       },
-      remove:async snap=>{ await(await getClientForAddressbook(snap.book)).deleteVCard({vCard:{url:snap.url,etag:snap.etag}}); },
+      remove:async snap=>{ await assertUnreferenced(snap); await(await getClientForAddressbook(snap.book)).deleteVCard({vCard:{url:snap.url,etag:snap.etag}}); },
       checkpoint:async(status,etag)=>{ await pool.query('UPDATE contact_operations SET status=$1,target_etag=COALESCE($2,target_etag),last_error=NULL,updated_at=now() WHERE id=$3',[status,etag??null,operation.id]); },
       commit:async()=>{
         const db=await pool.connect();

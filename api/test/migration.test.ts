@@ -26,5 +26,10 @@ test('additive identity migration preserves synthetic contacts/groups and is rep
     await assert.rejects(db.exec("INSERT INTO contacts(uid,vcard_uid,addressbook_id) VALUES ('another-id','legacy','a')"));
     await db.exec(sql);
     assert.equal((await db.query("SELECT contact_uid FROM contact_group_members")).rows[0].contact_uid,'legacy');
+    const groupsSql=await readFile(resolve(migrations,'006_carddav_groups.sql'),'utf8');
+    await db.exec(groupsSql);await db.exec(groupsSql);
+    assert.equal((await db.query('SELECT * FROM contact_groups')).rows.length,1);
+    assert.equal((await db.query('SELECT * FROM contact_group_members')).rows.length,1);
+    assert.equal((await db.query('SELECT * FROM contacts')).rows.length,2);
   } finally { await db.close(); }
 });

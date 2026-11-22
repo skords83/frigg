@@ -12,6 +12,7 @@ import usersRouter from './routes/users';
 import groupsRouter from './routes/groups';
 import transferRouter from './routes/transfer';
 import operationsRouter from './routes/operations';
+import carddavGroupsRouter from './routes/carddav-groups';
 import { startSyncSchedule } from './sync';
 import { runBootstrap } from './bootstrap';
 import { requireAuth, requireActive, requireAdmin } from './auth/middleware';
@@ -33,6 +34,7 @@ app.use('/api/sync', requireAuth, requireActive, syncRouter);
 app.use('/api/carddav-accounts', requireAuth, requireActive, carddavAccountsRouter);
 app.use('/api/users', requireAuth, requireActive, usersRouter);
 app.use('/api/groups', requireAuth, requireActive, groupsRouter);
+app.use('/api/carddav-groups', requireAuth, requireActive, carddavGroupsRouter);
 app.use('/api/operations', requireAuth, requireActive, operationsRouter);
 app.use('/api/transfer', requireAuth, requireActive, transferRouter);
 

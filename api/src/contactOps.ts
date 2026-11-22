@@ -3,6 +3,7 @@ import { getClientForAddressbook } from './carddav';
 import type { ContactRow } from './types';
 import { encodeText, foldLine, patchDocument, projectDocument, type EditableFields } from './vcardDocument';
 import { DavError } from './davSafety';
+import { readGroup } from './groupCard';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -72,9 +73,9 @@ export async function createContact(addressbookId: string, fields: ContactFields
 
   await pool.query(
     `INSERT INTO contacts
-       (uid, vcard_uid, addressbook_id, href, etag, fn, given_name, family_name, org, title,
+       (uid, vcard_uid, resource_kind, addressbook_id, href, etag, fn, given_name, family_name, org, title,
         birthday, note, photo_data_uri, phones, emails, addresses, raw_vcard)
-     VALUES ($17,$1,$2,$15,$3,$4,$5,$6,$7,$8,$9,$10,$16,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
+     VALUES ($17,$1,$18,$2,$15,$3,$4,$5,$6,$7,$8,$9,$10,$16,$11::jsonb,$12::jsonb,$13::jsonb,$14)`,
     [
       uid, addressbookId, etag,
       parsed.fn, parsed.given_name, parsed.family_name, parsed.org, parsed.title,
@@ -84,6 +85,7 @@ export async function createContact(addressbookId: string, fields: ContactFields
       new URL(`${encodeURIComponent(uid)}.vcf`, book.url).href,
       parsed.photo_data_uri,
       internalId,
+      readGroup(rawVcard) ? 'group' : 'contact',
     ]
   );
 
