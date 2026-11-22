@@ -5,11 +5,11 @@ const baseline = { uid:'synthetic', addressbook_id:'test-book', etag:'"base"', f
 for (const mobile of [false,true]) {
   test(`conflict decisions and repeated conflict (${mobile ? 'mobile dialog' : 'desktop'})`, async ({ page, context }) => {
     await context.addCookies([{ name:'frigg_sid', value:'synthetic-test-only', url:'http://127.0.0.1:4310' }]);
+    if(mobile)await page.setViewportSize({width:390,height:844});
     await page.goto('/');
     await page.getByRole('button', { name:/Anne Testperson/ }).click();
     await page.getByRole('button', { name:'Bearbeiten', exact:true }).click();
     await expect(page.getByPlaceholder('Notiz ...')).toHaveValue('Ursprünglich');
-    if (mobile) await page.setViewportSize({ width:390, height:844 });
     await page.getByPlaceholder('Notiz ...').fill('Meine Notiz');
     let requests = 0;
     await page.route('**/api/contacts/synthetic', async route => {

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import type { Contact, ContactGroup } from '@/types/contact';
+import type { Contact, ContactGroup, AddressBook } from '@/types/contact';
 import { contactPhotoUrl } from '@/types/contact';
 import { Seal, getInitials } from './Seal';
 import { EditModal } from './EditModal';
@@ -10,6 +10,8 @@ import { ActionButton } from './form-helpers';
 
 interface DetailPaneProps {
   contact: Contact | null;
+  addressbooks?: AddressBook[];
+  onMove?: (uid:string,book:string)=>Promise<void>;
   onUpdate?: (updated: Contact) => void;
   onDelete?: (uid: string) => void;
   groups?: ContactGroup[];
@@ -17,7 +19,10 @@ interface DetailPaneProps {
   onRemoveFromGroup?: (groupId: string, contactUid: string) => void;
 }
 
-export function DetailPane({ contact, onUpdate, onDelete, groups = [], onAddToGroup, onRemoveFromGroup }: DetailPaneProps) {
+export function DetailPane({ contact, onUpdate, onDelete, groups = [], addressbooks = [], onMove, onAddToGroup, onRemoveFromGroup }: DetailPaneProps) {
+  const [moveBook,setMoveBook]=useState('');
+  const [moveBusy,setMoveBusy]=useState(false);
+  const [deleteError,setDeleteError]=useState<string|null>(null);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const editBtnRef = useRef<HTMLButtonElement>(null);
@@ -35,16 +40,19 @@ export function DetailPane({ contact, onUpdate, onDelete, groups = [], onAddToGr
 
   async function handleDelete() {
     if (!contact) return;
+    setDeleteError(null);
+    try {
     const res = await fetch(`/api/contacts/${contact.uid}`, {
       method: 'DELETE',
       headers: { 'If-Match': contact.etag },
     });
-    if (!res.ok) return;
+    if (!res.ok) {setDeleteError(res.status===409?'Der Kontakt wurde zwischenzeitlich geändert. Bitte neu laden und erneut prüfen.':'Löschen wurde nicht bestätigt. Der Kontakt bleibt angezeigt.');return;}
     if (onDelete) {
       onDelete(contact.uid);
     } else {
       window.location.reload();
     }
+    } catch {setDeleteError('Server nicht erreichbar. Löschen wurde nicht bestätigt.');}
   }
 
   function handleSaved(updated: Contact) {
@@ -59,7 +67,7 @@ export function DetailPane({ contact, onUpdate, onDelete, groups = [], onAddToGr
   }
 
   return (
-    <div className="bg-surface overflow-y-auto px-14 py-12">
+    <div className="contact-detail bg-surface overflow-y-auto px-14 py-12">
       {editing && (
         <EditModal contact={contact} onClose={handleClose} onSave={handleSaved} />
       )}
@@ -72,6 +80,14 @@ export function DetailPane({ contact, onUpdate, onDelete, groups = [], onAddToGr
           onClose={() => setConfirmDelete(false)}
         />
       )}
+      {deleteError&&<p role="alert" className="text-[13px] text-red-400 mb-4">{deleteError}</p>}
+      {onMove&&addressbooks.length>1&&<div className="mobile-move mb-5 gap-2 flex-wrap text-[13px]">
+        <label htmlFor="move-book" className="text-muted">Verschieben nach</label>
+        <select id="move-book" className="bg-surface-raised border border-divider rounded px-2 py-1 max-w-full" value={moveBook} onChange={e=>setMoveBook(e.target.value)}>
+          <option value="">Adressbuch wählen</option>{addressbooks.filter(b=>b.id!==contact.addressbook_id).map(b=><option key={b.id} value={b.id}>{b.display_name}</option>)}
+        </select>
+        <button className="press text-accent disabled:opacity-50" disabled={!moveBook||moveBusy} onClick={async()=>{setMoveBusy(true);try{await onMove(contact.uid,moveBook);setMoveBook('');}finally{setMoveBusy(false);}}}>Verschieben</button>
+      </div>}
       <div key={contact.uid} className="detail-enter">
         {/* Header */}
         <div className="flex flex-col items-center text-center mb-9">
@@ -173,7 +189,7 @@ function GroupChips({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const memberOf = groups.filter((g) => g.member_uids.includes(contact.uid));
-  const available = groups.filter((g) => !g.member_uids.includes(contact.uid));
+  const available = groups.filter((g) => !g.member_uids.includes(contact.uid) && g.format !== 'unknown' && (g.kind !== 'carddav' || g.addressbook_id === contact.addressbook_id));
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 py-1">
@@ -186,6 +202,8 @@ function GroupChips({
           {onRemove && (
             <button
               onClick={() => onRemove(g.id)}
+              aria-label={`Aus Gruppe ${g.name} entfernen`}
+              disabled={g.format==='unknown'}
               className="text-muted hover:text-red-400 transition-colors leading-none"
             >×</button>
           )}

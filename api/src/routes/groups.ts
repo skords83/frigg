@@ -36,7 +36,7 @@ router.get('/', async (req: AuthedRequest, res: Response) => {
 
     res.json([...groups.map((g) => ({ id: g.id, kind: 'local', name: g.name, member_uids: memberMap.get(g.id) ?? [] })), ...await listCarddavGroups(req.user!.id)]);
   } catch (err) {
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
 });
@@ -55,7 +55,7 @@ router.post('/', withDavLock(async (req: AuthedRequest, res: Response) => {
   } catch (err) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((err as any)?.code === '23505') return res.status(409).json({ error: 'name already exists' });
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
 }));
@@ -75,7 +75,7 @@ router.patch('/:id', withDavLock(async (req: AuthedRequest, res: Response) => {
   } catch (err) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((err as any)?.code === '23505') return res.status(409).json({ error: 'name already exists' });
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
 }));
@@ -90,7 +90,7 @@ router.delete('/:id', withDavLock(async (req: AuthedRequest, res: Response) => {
     if (result.rowCount === 0) return res.status(404).json({ error: 'not found' });
     res.status(204).end();
   } catch (err) {
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
 }));
@@ -121,7 +121,7 @@ router.post('/:id/members', withDavLock(async (req: AuthedRequest, res: Response
     );
     res.status(204).end();
   } catch (err) {
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
 }));
@@ -141,7 +141,7 @@ router.delete('/:id/members/:contact_uid', withDavLock(async (req: AuthedRequest
     );
     res.status(204).end();
   } catch (err) {
-    console.error(err);
+    console.error('Group operation failed');
     res.status(500).json({ error: 'internal' });
   }
 }));

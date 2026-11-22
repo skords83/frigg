@@ -3,9 +3,10 @@ import {useState,useCallback,useEffect} from 'react';
 import type {ContactGroup} from '../types/contact';
 export function useGroups() {
   const [groups,setGroups]=useState<ContactGroup[]>([]),[error,setError]=useState<string|null>(null);
-  const refresh=useCallback(async()=>{const res=await fetch('/api/groups');if(res.ok)setGroups(await res.json());},[]);
+  const refresh=useCallback(async()=>{try{const res=await fetch('/api/groups');if(res.ok)setGroups(await res.json());}catch{setError('Gruppen konnten nicht aktualisiert werden. Vorhandene Einträge bleiben angezeigt.');}},[]);
   useEffect(()=>{void refresh();const interval=setInterval(()=>{void refresh();},30_000);return()=>clearInterval(interval);},[refresh]);
   const request=useCallback(async(id:string,method:string,suffix='',body?:unknown)=>{
+    try {
     const group=groups.find(g=>g.id===id),dav=group?.kind==='carddav';
     const res=await fetch(`/api/${dav?'carddav-groups':'groups'}/${encodeURIComponent(id)}${suffix}`,{method,headers:{'Content-Type':'application/json',...(dav?{'If-Match':group.etag??''}:{})},body:body?JSON.stringify(body):undefined});
     if(!res.ok) {
@@ -16,6 +17,7 @@ export function useGroups() {
       return false;
     }
     setError(null);await refresh();return true;
+    }catch{setError('Server nicht erreichbar. Die Gruppenänderung ist nicht bestätigt.');return false;}
   },[groups,refresh]);
   const createGroup=useCallback(async(name:string,options?:{addressbook_id:string;format:'vcard4'|'apple'})=>{
     const res=await fetch(options?'/api/carddav-groups':'/api/groups',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,...options})});

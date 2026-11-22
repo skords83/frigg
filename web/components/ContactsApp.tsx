@@ -26,6 +26,7 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   const [contacts, setContacts] = useState(initialContacts);
   const [addressbooks, setAddressbooks] = useState(initialAddressbooks);
   const [selected, setSelected] = useState<string | SmartCollection>('all');
+  const [mobilePane,setMobilePane] = useState<'navigation'|'list'|'detail'>('list');
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
@@ -147,7 +148,12 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
   }
 
   return (
-    <div className="grid h-screen overflow-hidden" style={{ gridTemplateColumns: '220px 300px 1fr', gridTemplateRows: '1fr' }}>
+    <div className="frigg-layout" data-pane={mobilePane==='detail'&&!selectedUid?'list':mobilePane}>
+      <nav className="mobile-navigation bg-surface border-b border-divider px-3 items-center gap-4 text-[13px]" aria-label="Mobile Navigation">
+        <button className="press text-accent" onClick={()=>setMobilePane('navigation')}>Navigation</button>
+        <button className="press text-accent" onClick={()=>setMobilePane('list')}>Kontakte</button>
+        {selectedUid&&<button className="press text-accent" onClick={()=>setMobilePane('detail')}>Details</button>}
+      </nav>
       {showNewContact && (
         <NewContactModal
           addressbooks={addressbooks}
@@ -193,11 +199,12 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
       )}
       {groupError&&<div role="alert" className="fixed top-3 right-3 z-50 max-w-sm rounded-lg bg-surface-raised border border-divider p-3 text-[13px]">{groupError}<button className="press block mt-2 text-accent" onClick={clearGroupError}>Schließen</button></div>}
       <PendingOperations onComplete={()=>invalidateContacts().then(()=>router.refresh())}/>
+      <div className="app-pane navigation-pane">
       <Sidebar
         addressbooks={addressbooks}
         addressbookCounts={addressbookCounts}
         selected={selected}
-        onSelect={(id) => { setSelected(id); setSelectedUid(null); }}
+        onSelect={(id) => { setSelected(id); setSelectedUid(null); setMobilePane('list'); }}
         recentCount={recentCount}
         birthdayCount={birthdayCount}
         noPhotoCount={noPhotoCount}
@@ -223,15 +230,19 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         onDedup={() => setShowDedup(true)}
         onExportImport={() => setShowExportImport(true)}
       />
+      </div>
+      <div className="app-pane list-pane">
       <ContactList
         contacts={filtered}
         selectedUid={selectedUid}
-        onSelect={setSelectedUid}
+        onSelect={uid=>{setSelectedUid(uid);setMobilePane('detail');}}
         search={search}
         onSearchChange={setSearch}
         onNew={() => setShowNewContact(true)}
         view={selected === 'birthdays' ? 'birthday' : selected === 'recent' ? 'recent' : 'default'}
       />
+      </div>
+      <div className="app-pane detail-pane">
       <DetailPane
         contact={selectedContact}
         onUpdate={handleUpdate}
@@ -239,7 +250,10 @@ export function ContactsApp({ initialContacts, initialAddressbooks }: ContactsAp
         groups={manualGroups}
         onAddToGroup={addMember}
         onRemoveFromGroup={removeMember}
+        addressbooks={addressbooks}
+        onMove={moveContact}
       />
+      </div>
     </div>
   );
 }

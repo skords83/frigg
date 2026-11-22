@@ -29,7 +29,7 @@ export function ConfirmDialog({ title, message, confirmLabel = 'Löschen', onCon
             className="press px-4 py-1.5 rounded-md text-[13px] text-muted hover:text-foreground hover:bg-surface-raised transition-colors"
           >Abbrechen</button>
           <button
-            onClick={() => requestClose(onConfirm)}
+            onClick={() => requestClose(() => { onClose(); onConfirm(); })}
             className="press px-4 py-1.5 rounded-md text-[13px] bg-red-500/90 text-white hover:bg-red-500 transition-colors"
           >{confirmLabel}</button>
         </div>

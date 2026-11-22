@@ -5,7 +5,7 @@ createServer((req,res) => {
   if (req.url === '/healthz') return res.end('{}');
   if (req.url === '/api/auth/me') return res.end(JSON.stringify({ user: { id:'test-user', email:'synthetic@example.invalid', role:'user', mustChangePassword:false } }));
   if (req.url === '/api/contacts') return res.end(JSON.stringify(req.headers.cookie?.includes('duplicates=yes')?[contact,{...contact,uid:'synthetic-duplicate',fn:'Anne Testperson (zweiter Eintrag)',note:'Zusätzliche Notiz'}]:[contact]));
-  if (req.url === '/api/addressbooks') return res.end(JSON.stringify([{ id:'test-book', display_name:'Synthetisch', url:'https://dav.invalid/book/', contact_count:1, is_owner:true }]));
+  if (req.url === '/api/addressbooks') return res.end(JSON.stringify([{ id:'test-book', display_name:'Synthetisch', url:'https://dav.invalid/book/', contact_count:1, is_owner:true }, ...(req.headers.cookie?.includes('two-books=yes')?[{id:'second-book',display_name:'Zweites Buch',url:'https://dav.invalid/second/',contact_count:0,is_owner:true}]:[])]));
   if (req.url === '/api/operations') return res.end('[]');
   if (req.url === '/api/groups') return res.end('[]');
   if (req.url === '/api/contacts/synthetic/edit') return res.end(JSON.stringify(contact));

@@ -4,7 +4,7 @@ import type { AuthedRequest } from '../auth/middleware';
 import { canAccessAddressbook } from '../auth/access';
 import type { ContactRow } from '../types';
 import { readRemoteContact, publicEditContact } from '../remoteContact';
-import { getClientForAddressbook } from '../carddav';
+import { getClientForAddressbook, requireDavPrivilege } from '../carddav';
 import { DavError, requireEtag } from '../davSafety';
 import { projectDocument, readDocument } from '../vcardDocument';
 import { mergePreview, type MergeChoices } from '../mergeVCard';
@@ -30,7 +30,7 @@ async function assertUnreferenced(source: Snapshot) {
     if (!card.url) throw new DavError(409,'membership_check_failed');
     const native = await client.readVCard(new URL(card.url,source.bookUrl).href);
     if (!native) throw new DavError(409,'membership_check_failed');
-    if (readDocument(native.raw).some(l=>['MEMBER','X-ADDRESSBOOKSERVER-MEMBER','RELATED'].includes(l.name) && [source.uid,`urn:uuid:${source.uid}`].includes(l.value))) throw new DavError(409,'contact_is_referenced');
+    if (readDocument(native.raw).some(l=>['MEMBER','X-ADDRESSBOOKSERVER-MEMBER','RELATED'].includes(l.name) && [source.uid,`urn:uuid:${source.uid}`,source.url].some(ref=>ref===l.value||/^urn:uuid:/i.test(ref)&&ref.toLowerCase()===l.value.toLowerCase()))) throw new DavError(409,'contact_is_referenced');
   }
 }
 async function operationFor(req: AuthedRequest): Promise<StoredOperation> {
@@ -82,6 +82,8 @@ router.post('/preview', withDavLock(async (req,res) => {
       // a referenced duplicate needs a separate explicit membership operation.
       result=mergePreview(target.raw,source.raw).raw;
     }
+    await requireDavPrivilege(await getClientForAddressbook(source.book),source.bookUrl,'unbind');
+    await requireDavPrivilege(await getClientForAddressbook(target.book),req.body.kind==='move'?target.bookUrl:target.url,req.body.kind==='move'?'bind':'writeContent');
     await assertUnreferenced(source);
     const plan = {source,target,result};
     const [op] = await query<StoredOperation>('INSERT INTO contact_operations(owner_id,kind,source_uid,target_uid,plan) VALUES ($1,$2,$3,$4,$5::jsonb) RETURNING *',[req.user!.id,req.body.kind,source.id,target.id,JSON.stringify(plan)]);
