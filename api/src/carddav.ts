@@ -1,3 +1,4 @@
+import { diagnostics, diagnosticStep } from './syncDiagnostics';
 import { createDAVClient } from 'tsdav';
 import VCF from 'vcf';
 import { projectDocument } from './vcardDocument';
@@ -22,7 +23,7 @@ interface CardDavAccountRow {
 // invalidateAccountClient() must be called whenever a row's credentials change.
 const clientCache = new Map<string, DAVClientInstance>();
 
-async function buildClient(account: CardDavAccountRow): Promise<DAVClientInstance> {
+export async function buildClient(account: CardDavAccountRow, transport?: typeof fetch): Promise<DAVClientInstance> {
   const password = decryptSecret({
     ciphertext: account.password_encrypted,
     iv: account.password_iv,
@@ -33,7 +34,7 @@ async function buildClient(account: CardDavAccountRow): Promise<DAVClientInstanc
     credentials: { username: account.username, password },
     authMethod: 'Basic',
     defaultAccountType: 'carddav',
-    fetch: guardedDavFetch(),
+    fetch: guardedDavFetch(transport),
   });
   return withNativeCards(client);
 }
@@ -66,14 +67,15 @@ export function withNativeCards(client: DAVClientInstance): DAVClientInstance {
       const responses = await client.addressBookQuery({url:addressBook.url,depth:'1',props:{'d:getetag':{}}});
       if (!Array.isArray(responses) || !responses.length) throw new DavError(503,'invalid_collection_response');
       const cards = [];
+      if (diagnostics()) diagnostics()!.listed = responses.filter((r: DAVClientInstance) => r.href).length;
       for (const response of responses) {
         if (!response.ok || response.error) throw new DavError(503,'collection_unavailable');
         // tsdav represents a valid, empty DAV multistatus by this sentinel.
         if (!response.href && response.status === 207 && !response.raw) continue;
         if (!response.href || !response.raw?.multistatus) throw new DavError(503,'invalid_collection_response');
         const url = resourceUrl(addressBook.url,response.href);
-        const native = await nativeClient.readVCard(url);
-        if (!native) throw new DavError(409,'collection_changed');
+        const native = await diagnosticStep<{ raw: string; etag: string } | null>('native_read', () => nativeClient.readVCard(url), url);
+        if (!native) { diagnostics()?.failure('missing_resource', 'native_read', url); throw new DavError(409,'collection_changed'); }
         cards.push({url,data:native.raw,etag:native.etag});
       }
       return cards;
@@ -148,13 +150,16 @@ export interface ParsedCard {
   raw_vcard: string;
 }
 
-export function parseVCard(raw: string): ParsedCard | null {
+export function parseVCard(raw: string, href?: string): ParsedCard | null {
+  let phase: 'document_parse_failed' | 'vcf_parse_failed' = 'document_parse_failed';
   try {
     // Preserve the original syntax; vcf remains a secondary interoperability check.
     const projected = projectDocument(raw);
+    phase = 'vcf_parse_failed';
     VCF.parse(raw.replace(/\r?\n/g, '\r\n'));
     return projected;
-  } catch {
+  } catch (err) {
+    diagnostics()?.failure(phase, 'parse', href, err instanceof DavError ? err.code : undefined);
     return null;
   }
 }
