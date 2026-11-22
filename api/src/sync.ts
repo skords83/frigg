@@ -1,3 +1,4 @@
+import { diagnosticBook, diagnosticStep, diagnostics, safeSyncException } from './syncDiagnostics';
 import cron from 'node-cron';
 import { getClientForAccount, parseVCard } from './carddav';
 import { query, pool } from './db';
@@ -15,7 +16,7 @@ async function upsertContact(
   etag: string,
   data: string,
 ): Promise<boolean> {
-  const parsed = parseVCard(data);
+  const parsed = parseVCard(data, href);
   if (!parsed) return false;
 
   // Preserve internal IDs and local memberships while scoping remote UIDs to a book.
@@ -66,6 +67,7 @@ async function upsertContact(
       readGroup(data) ? 'group' : 'contact',
     ]
   );
+  if (result.rowCount !== 1) diagnostics()?.failure('uid_href_conflict', 'upsert', href);
   return result.rowCount === 1;
 }
 
@@ -76,39 +78,40 @@ export async function fullSync(
   displayName: string,
   force = false,
 ): Promise<{ synced: number; errors: number; syncToken: string | null }> {
-  console.log(`[sync] ${displayName}: full sync${force ? ' (forced re-parse)' : ''} …`);
-  let synced = 0;
-  let errors = 0;
+  return diagnosticBook(book.url, async () => {
+    let synced = 0;
+    let errors = 0;
 
-  const vCards = await client.fetchVCards({ addressBook: book });
-  const serverHrefs = new Set<string>();
+    const vCards = await diagnosticStep<DAVClient[]>('listing', () => client.fetchVCards({ addressBook: book }));
+    if (diagnostics()) diagnostics()!.listed = vCards.length;
+    const serverHrefs = new Set<string>();
 
-  for (const card of vCards) {
-    const href = card.url ? new URL(card.url, book.url).href : '';
-    if (!href || !card.data) { errors++; continue; }
-    serverHrefs.add(href);
-    const native = await client.readVCard(href);
-    if (!native) { errors++; continue; }
-    const ok = await upsertContact(bookId, href, native.etag, native.raw);
-    if (ok) synced++;
-    else errors++;
-  }
+    for (const card of vCards) {
+      const href = card.url ? new URL(card.url, book.url).href : '';
+      if (!href || !card.data) { diagnostics()?.failure('invalid_resource', 'listing', href); errors++; continue; }
+      serverHrefs.add(href);
+      const native = await diagnosticStep<{ raw: string; etag: string } | null>('native_read', () => client.readVCard(href), href);
+      if (!native) { diagnostics()?.failure('missing_resource', 'native_read', href); errors++; continue; }
+      const ok = await diagnosticStep('upsert', () => upsertContact(bookId, href, native.etag, native.raw), href);
+      if (ok) { synced++; if (diagnostics()) diagnostics()!.upserts++; }
+      else errors++;
+    }
 
-  // Delete contacts that no longer exist on the server
-  const existing = await query<{ href: string | null; uid: string }>(
-    'SELECT uid, href FROM contacts WHERE addressbook_id = $1',
-    [bookId]
-  );
-  const toDelete = (errors ? [] : existing)
-    .filter((r) => r.href !== null && !serverHrefs.has(new URL(r.href, book.url).href))
-    .map((r) => r.uid);
-  if (toDelete.length) {
-    await pool.query('DELETE FROM contacts WHERE uid = ANY($1::text[]) AND addressbook_id = $2', [toDelete, bookId]);
-    console.log(`[sync] ${displayName}: removed ${toDelete.length} stale contacts`);
-  }
+    // Delete contacts that no longer exist on the server
+    const existing = await query<{ href: string | null; uid: string }>(
+      'SELECT uid, href FROM contacts WHERE addressbook_id = $1',
+      [bookId]
+    );
+    const toDelete = (errors ? [] : existing)
+      .filter((r) => r.href !== null && !serverHrefs.has(new URL(r.href, book.url).href))
+      .map((r) => r.uid);
+    if (toDelete.length) {
+      await diagnosticStep('cleanup', () => pool.query('DELETE FROM contacts WHERE uid = ANY($1::text[]) AND addressbook_id = $2', [toDelete, bookId]));
+    }
 
-  const syncToken = (book as Record<string, unknown>).syncToken as string | null ?? null;
-  return { synced, errors, syncToken };
+    const syncToken = (book as Record<string, unknown>).syncToken as string | null ?? null;
+    return { synced, errors, syncToken };
+  });
 }
 
 export async function deltaSync(
@@ -118,73 +121,75 @@ export async function deltaSync(
   displayName: string,
   storedSyncToken: string,
 ): Promise<{ synced: number; errors: number; syncToken: string | null }> {
-  console.log(`[sync] ${displayName}: delta sync from token …`);
-  let synced = 0;
-  let errors = 0;
+  return diagnosticBook(book.url, async () => {
+    let synced = 0;
+    let errors = 0;
 
-  // RFC 6578: sync-collection REPORT with the last known sync-token
-  const responses: DAVClient[] = await client.syncCollection({
-    url: book.url,
-    props: { 'card:address-data': {}, 'd:getetag': {} },
-    syncLevel: 1,
-    syncToken: storedSyncToken,
-  });
-
-  // The new sync-token is in the multistatus wrapper of the first response
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const newSyncToken: string | null =
-    (responses[0] as any)?.raw?.multistatus?.syncToken ??
-    null;
-  if (!newSyncToken || responses.some((r) => ![200, 201, 204, 207, 404].includes(r.status))) {
-    throw new Error('Invalid sync response');
-  }
-
-  const vcfResponses = responses.filter(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (r: any) => typeof r.href === 'string' && new URL(r.href, book.url).href !== new URL(book.url).href
-  );
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const changedHrefs = vcfResponses.filter((r: any) => r.status !== 404).map((r: any) => new URL(r.href, book.url).href);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const deletedHrefs = vcfResponses.filter((r: any) => r.status === 404).map((r: any) => new URL(r.href, book.url).href);
-
-  console.log(`[sync] ${displayName}: ${changedHrefs.length} changed, ${deletedHrefs.length} deleted`);
-
-  // Fetch full vCard data for changed/added resources
-  if (changedHrefs.length > 0) {
-    const multigetResults = await client.addressBookMultiGet({
+    // RFC 6578: sync-collection REPORT with the last known sync-token
+    const responses: DAVClient[] = await diagnosticStep('listing', () => client.syncCollection({
       url: book.url,
       props: { 'card:address-data': {}, 'd:getetag': {} },
-      objectUrls: changedHrefs,
-      depth: '1',
-    });
+      syncLevel: 1,
+      syncToken: storedSyncToken,
+    }));
 
-    const returned = new Set(multigetResults.map((r: DAVClient) => r.href ? new URL(r.href, book.url).href : ''));
-    if (returned.size !== changedHrefs.length || changedHrefs.some((href: string) => !returned.has(href))) errors++;
-    for (const res of multigetResults) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const r = res as any;
-      const href: string = r.href ? new URL(r.href, book.url).href : '';
-      const data: string = r.props?.addressData?._cdata ?? r.props?.addressData ?? '';
-      if (!data || !href || r.status >= 400) { errors++; continue; }
-
-      const native = await client.readVCard(href);
-      if (!native) { errors++; continue; }
-      const ok = await upsertContact(bookId, href, native.etag, native.raw);
-      if (ok) synced++; else errors++;
+    // The new sync-token is in the multistatus wrapper of the first response
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const newSyncToken: string | null =
+      (responses[0] as any)?.raw?.multistatus?.syncToken ??
+      null;
+    if (!newSyncToken || responses.some((r) => ![200, 201, 204, 207, 404].includes(r.status))) {
+      const err = new Error('Invalid sync response');
+      diagnostics()?.exception(err, 'listing');
+      throw err;
     }
-  }
 
-  // Delete contacts by href
-  if (errors === 0 && deletedHrefs.length > 0) {
-    await pool.query(
-      'DELETE FROM contacts WHERE href = ANY($1::text[]) AND addressbook_id = $2',
-      [deletedHrefs, bookId]
+    const vcfResponses = responses.filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (r: any) => typeof r.href === 'string' && new URL(r.href, book.url).href !== new URL(book.url).href
     );
-    console.log(`[sync] ${displayName}: deleted ${deletedHrefs.length} contacts`);
-  }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const changedHrefs = vcfResponses.filter((r: any) => r.status !== 404).map((r: any) => new URL(r.href, book.url).href);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deletedHrefs = vcfResponses.filter((r: any) => r.status === 404).map((r: any) => new URL(r.href, book.url).href);
 
-  return { synced, errors, syncToken: newSyncToken };
+    if (diagnostics()) diagnostics()!.listed = changedHrefs.length;
+
+    // Fetch full vCard data for changed/added resources
+    if (changedHrefs.length > 0) {
+      const multigetResults = await diagnosticStep<DAVClient[]>('listing', () => client.addressBookMultiGet({
+        url: book.url,
+        props: { 'card:address-data': {}, 'd:getetag': {} },
+        objectUrls: changedHrefs,
+        depth: '1',
+      }));
+
+      const returned = new Set(multigetResults.map((r: DAVClient) => r.href ? new URL(r.href, book.url).href : ''));
+      if (returned.size !== changedHrefs.length || changedHrefs.some((href: string) => !returned.has(href))) { diagnostics()?.failure('multiget_incomplete', 'listing'); errors++; }
+      for (const res of multigetResults) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = res as any;
+        const href: string = r.href ? new URL(r.href, book.url).href : '';
+        const data: string = r.props?.addressData?._cdata ?? r.props?.addressData ?? '';
+        if (!data || !href || r.status >= 400) { diagnostics()?.failure('invalid_resource', 'listing', href); errors++; continue; }
+
+        const native = await diagnosticStep<{ raw: string; etag: string } | null>('native_read', () => client.readVCard(href), href);
+        if (!native) { diagnostics()?.failure('missing_resource', 'native_read', href); errors++; continue; }
+        const ok = await diagnosticStep('upsert', () => upsertContact(bookId, href, native.etag, native.raw), href);
+        if (ok) { synced++; if (diagnostics()) diagnostics()!.upserts++; } else errors++;
+      }
+    }
+
+    // Delete contacts by href
+    if (errors === 0 && deletedHrefs.length > 0) {
+      await diagnosticStep('cleanup', () => pool.query(
+        'DELETE FROM contacts WHERE href = ANY($1::text[]) AND addressbook_id = $2',
+        [deletedHrefs, bookId]
+      ));
+    }
+
+    return { synced, errors, syncToken: newSyncToken };
+  });
 }
 
 async function runSyncUnlocked(force = false): Promise<{ synced: number; errors: number }> {
@@ -204,69 +209,78 @@ async function runSyncUnlocked(force = false): Promise<{ synced: number; errors:
       const books = await client.fetchAddressBooks();
 
       for (const book of books) {
-        const [knownBook] = await query<{ id: string }>('SELECT id FROM addressbooks WHERE url = $1 AND carddav_account_id = $2', [book.url, account.id]);
-        const bookId = knownBook?.id ?? crypto.randomUUID();
-        const displayName = (book.displayName as string | undefined) ?? book.url;
-        const newCtag = (book as Record<string, unknown>).ctag as string | undefined ?? null;
+        await diagnosticBook(book.url, async () => {
+          const [knownBook] = await query<{ id: string }>('SELECT id FROM addressbooks WHERE url = $1 AND carddav_account_id = $2', [book.url, account.id]);
+          const bookId = knownBook?.id ?? crypto.randomUUID();
+          const displayName = (book.displayName as string | undefined) ?? book.url;
+          const newCtag = (book as Record<string, unknown>).ctag as string | undefined ?? null;
 
-        // Read stored state BEFORE upserting so we can compare old vs new ctag
-        const [stored] = await query<AddressBookRow>(
-          'SELECT ctag, sync_token FROM addressbooks WHERE id = $1',
-          [bookId]
-        );
+          // Read stored state BEFORE upserting so we can compare old vs new ctag
+          const [stored] = await query<AddressBookRow>(
+            'SELECT ctag, sync_token FROM addressbooks WHERE id = $1',
+            [bookId]
+          );
 
-        // Upsert addressbook metadata (sync_token is managed separately below)
-        await pool.query(
-          `INSERT INTO addressbooks (id, display_name, url, ctag, carddav_account_id, updated_at)
-           VALUES ($1, $2, $3, $4, $5, now())
-           ON CONFLICT (id) DO UPDATE
-             SET display_name = EXCLUDED.display_name,
-                 carddav_account_id = EXCLUDED.carddav_account_id,
-                 updated_at   = now()`,
-          [bookId, displayName, book.url, null, account.id]
-        );
+          // Upsert addressbook metadata (sync_token is managed separately below)
+          await pool.query(
+            `INSERT INTO addressbooks (id, display_name, url, ctag, carddav_account_id, updated_at)
+             VALUES ($1, $2, $3, $4, $5, now())
+             ON CONFLICT (id) DO UPDATE
+               SET display_name = EXCLUDED.display_name,
+                   carddav_account_id = EXCLUDED.carddav_account_id,
+                   updated_at   = now()`,
+            [bookId, displayName, book.url, null, account.id]
+          );
 
-        const [pending] = await query<{count:string}>("SELECT COUNT(*)::text AS count FROM contact_operations WHERE status NOT IN ('complete','cancelled') AND (plan->'source'->>'book'=$1 OR plan->'target'->>'book'=$1)",[bookId]);
-        if (Number(pending.count)>0) { errors++; continue; }
-        const needsSync = force || !newCtag || !stored?.ctag || stored.ctag !== newCtag;
-        if (!needsSync) {
-          console.log(`[sync] ${displayName}: ctag unchanged, skipping`);
-          continue;
-        }
-
-        let result: { synced: number; errors: number; syncToken: string | null };
-
-        const [{ count }] = await query<{ count: string }>(
-          'SELECT COUNT(*)::text AS count FROM contacts WHERE addressbook_id = $1',
-          [bookId]
-        );
-        const hasLocalContacts = parseInt(count, 10) > 0;
-
-        if (!force && stored?.sync_token && hasLocalContacts) {
-          try {
-            result = await deltaSync(client, book, bookId, displayName, stored.sync_token);
-          } catch (err) {
-            // Server rejected the sync-token (expired / invalid) → fall back to full sync
-            console.warn('[sync] Delta sync failed; falling back to full sync');
-            result = await fullSync(client, book, bookId, displayName);
+          const [pending] = await query<{count:string}>("SELECT COUNT(*)::text AS count FROM contact_operations WHERE status NOT IN ('complete','cancelled') AND (plan->'source'->>'book'=$1 OR plan->'target'->>'book'=$1)",[bookId]);
+          if (Number(pending.count)>0) { diagnostics()?.failure('pending_operation', 'preflight'); errors++; return; }
+          const needsSync = force || !newCtag || !stored?.ctag || stored.ctag !== newCtag;
+          if (!needsSync) {
+            return;
           }
-        } else {
-          result = await fullSync(client, book, bookId, displayName, force);
-        }
 
-        synced += result.synced;
-        errors += result.errors;
+          let result: { synced: number; errors: number; syncToken: string | null };
 
-        // Persist the new sync-token from the server
-        if (result.errors === 0) await pool.query(
-          'UPDATE addressbooks SET sync_token = $1, ctag = $3, updated_at = now() WHERE id = $2',
-          [result.syncToken, bookId, newCtag]
-        );
+          const [{ count }] = await query<{ count: string }>(
+            'SELECT COUNT(*)::text AS count FROM contacts WHERE addressbook_id = $1',
+            [bookId]
+          );
+          const hasLocalContacts = parseInt(count, 10) > 0;
+
+          if (!force && stored?.sync_token && hasLocalContacts) {
+            try {
+              result = await deltaSync(client, book, bookId, displayName, stored.sync_token);
+            } catch (err) {
+              // Server rejected the sync-token (expired / invalid) → fall back to full sync
+              console.warn('[sync] Delta sync failed; falling back to full sync');
+              result = await fullSync(client, book, bookId, displayName);
+            }
+          } else {
+            result = await fullSync(client, book, bookId, displayName, force);
+          }
+
+          synced += result.synced;
+          errors += result.errors;
+
+          // Persist the new sync-token from the server
+          if (result.errors === 0) {
+            try {
+              await diagnosticStep('markers', () => pool.query(
+                'UPDATE addressbooks SET sync_token = $1, ctag = $3, updated_at = now() WHERE id = $2',
+                [result.syncToken, bookId, newCtag]
+              ));
+              if (diagnostics()) diagnostics()!.markers = 'advanced';
+            } catch (err) {
+              if (diagnostics()) diagnostics()!.markers = 'write_failed';
+              throw err;
+            }
+          }
+        });
       }
     } catch (err) {
       // One account's failure (e.g. wrong/expired Baïkal password) shouldn't stop
       // the others from syncing.
-      console.error('[sync] Account synchronization failed');
+      safeSyncException(err);
       errors++;
     }
   }
@@ -296,9 +310,9 @@ export async function runSync(force = false): Promise<{ synced: number; errors: 
 }
 
 export function startSyncSchedule(): void {
-  runSync().catch((err) => console.error('[sync] Initial sync failed', err));
+  runSync().catch((err) => safeSyncException(err));
 
   cron.schedule('*/5 * * * *', () => {
-    runSync().catch((err) => console.error('[sync] Scheduled sync failed', err));
+    runSync().catch((err) => safeSyncException(err));
   });
 }

@@ -107,3 +107,36 @@ test('import splitting ignores BEGIN:VCARD inside an escaped note', () => {
   assert.equal(cards.length, 2);
   assert.equal(projectDocument(cards[0]).note, 'BEGIN:VCARD is text');
 });
+
+for (const version of ['3.0', '4.0'] as const) {
+  for (const newline of ['\r\n', '\n']) {
+    test(`vCard ${version}: blank lines, folds and empty values (${JSON.stringify(newline)})`, () => {
+      const raw = ['', 'BEGIN:VCARD', '', `VERSION:${version}`, 'UID:blank-lines', '',
+        'FN: Synthetic ', 'NOTE: left ', '  right', '\t\ttail ', '',
+        'TITLE:', 'X-EMPTY:', '', 'X-FOLDED:one', ' two', '', 'END:VCARD', ''].join(newline);
+      const parsed = parseVCard(raw)!;
+      assert.ok(parsed);
+      assert.equal(parsed.raw_vcard, raw);
+      assert.equal(parsed.fn, ' Synthetic ');
+      assert.equal(parsed.note, ' left  right\ttail ');
+      assert.equal(parsed.title, '');
+      assert.equal(readDocument(raw).find(l => l.name === 'X-EMPTY')?.value, '');
+      assert.equal(patchDocument(raw, {}), raw);
+      const edited = patchDocument(raw, { title: 'New' });
+      for (const line of readDocument(raw).filter(l => l.name !== 'TITLE')) {
+        assert.deepEqual(readDocument(edited).find(l => l.id === line.id), line);
+      }
+    });
+  }
+}
+
+test('blank physical lines are not removed before unfolding and whitespace is not trimmed', () => {
+  const wrap = (extra: string) => 'BEGIN:VCARD\r\nVERSION:4.0\r\nUID:blank\r\nNOTE:first\r\n' + extra + 'END:VCARD\r\n';
+  assert.throws(() => readDocument(wrap('\r\n continuation\r\n')), { subcategory: 'missing_separator' });
+  assert.throws(() => readDocument(wrap('\r\n  \r\n')), { subcategory: 'missing_separator' });
+  assert.throws(() => readDocument(wrap('\r\n\u00a0\r\n')), { subcategory: 'missing_separator' });
+  assert.throws(() => readDocument(wrap('\r\n :value\r\n')), { subcategory: 'empty_property_name' });
+  assert.equal(projectDocument(wrap(' \r\n')).note, 'first');
+  assert.equal(projectDocument(wrap('  \r\n')).note, 'first ');
+  assert.equal(projectDocument(wrap('\t\t\r\n')).note, 'first\t');
+});

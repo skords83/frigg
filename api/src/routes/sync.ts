@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { runSync } from '../sync';
+import { safeSyncException } from '../syncDiagnostics';
 
 const router = Router();
 
@@ -11,7 +12,7 @@ router.post('/', async (req: Request, res: Response) => {
     const result = await runSync(force);
     res.json(result);
   } catch (err) {
-    console.error(err);
+    safeSyncException(err);
     res.status(500).json({ error: 'sync failed' });
   }
 });

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { DavError } from './davSafety';
+import { VCardStructureError } from './vcardStructureError';
 import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
 
 export interface ContentLine {
@@ -45,28 +46,44 @@ export function foldLine(line: string): string {
 }
 
 export function readDocument(raw: string): ContentLine[] {
-  if (typeof raw !== 'string' || raw.includes('\0') || /\r(?!\n)/.test(raw)) throw new DavError(422, 'invalid_vcard');
+  // Keep structural checks strict; tolerate only empty logical lines after unfolding.
+  if (typeof raw !== 'string') throw new VCardStructureError('non_string_input');
+  if (raw.includes('\0')) throw new VCardStructureError('nul_character');
+  if (/\r(?!\n)/.test(raw)) throw new VCardStructureError('bare_cr');
   const physical = raw.replace(/\r\n/g, '\n').split('\n');
   while (physical.at(-1) === '') physical.pop();
   const logical: string[] = [];
   for (const line of physical) {
     if (/^[ \t]/.test(line)) {
-      if (!logical.length) throw new DavError(422, 'invalid_vcard');
+      if (!logical.length) throw new VCardStructureError('orphan_fold');
       logical[logical.length - 1] += '\r\n' + line;
     } else logical.push(line);
   }
   const occurrences = new Map<string, number>();
-  const lines = logical.map(original => {
-    const unfolded = original.replace(/\r\n[ \t]/g, '');
+  // Unfold before filtering: removing physical blank lines first could attach a
+  // continuation to the wrong property. Never trim meaningful spaces or tabs.
+  const content = logical.map(original => ({
+    original, unfolded: original.replace(/\r\n[ \t]/g, ''),
+  })).filter(line => line.unfolded !== '');
+  const lines = content.map(({ original, unfolded }, index) => {
     let quoted = false, colon = -1;
     for (let i = 0; i < unfolded.length; i++) {
       if (unfolded[i] === '"') quoted = !quoted;
       if (unfolded[i] === ':' && !quoted) { colon = i; break; }
     }
-    if (colon < 1) throw new DavError(422, 'invalid_vcard');
+    if (colon < 1) {
+      throw new VCardStructureError(colon === 0 ? 'empty_property_name'
+        : quoted ? 'unclosed_header_quote' : 'missing_separator');
+    }
     const header = unfolded.slice(0, colon), value = unfolded.slice(colon + 1);
     const qualified = splitValue(header, ';', true)[0];
-    if (!/^(?:[A-Za-z0-9-]+\.)?[A-Za-z0-9-]+$/.test(qualified)) throw new DavError(422, 'invalid_vcard');
+    if (!/^(?:[A-Za-z0-9-]+\.)?[A-Za-z0-9-]+$/.test(qualified)) {
+      const parts = qualified.split('.');
+      throw new VCardStructureError(index === 0 && qualified.startsWith('\uFEFF') ? 'leading_bom'
+        : parts.length > 2 ? 'multiple_group_separators'
+        : parts.length === 2 && !/^[A-Za-z0-9-]+$/.test(parts[0]) ? 'invalid_group_name'
+        : 'invalid_property_name');
+    }
     const dot = qualified.indexOf('.');
     const group = dot < 0 ? '' : qualified.slice(0, dot);
     const name = qualified.slice(dot + 1).toUpperCase();
@@ -75,7 +92,11 @@ export function readDocument(raw: string): ContentLine[] {
     occurrences.set(hash, occurrence + 1);
     return { id: `${hash}:${occurrence}`, group, name, header, value, original };
   });
-  if (lines[0]?.name !== 'BEGIN' || lines[0].value.toUpperCase() !== 'VCARD' || lines.at(-1)?.name !== 'END' || lines.at(-1)?.value.toUpperCase() !== 'VCARD' || lines.filter(l => ['BEGIN', 'END'].includes(l.name)).length !== 2) throw new DavError(422, 'invalid_vcard');
+  if (lines[0]?.name !== 'BEGIN') throw new VCardStructureError('missing_begin');
+  if (lines[0].value.toUpperCase() !== 'VCARD') throw new VCardStructureError('invalid_begin_value');
+  if (lines.at(-1)?.name !== 'END') throw new VCardStructureError('missing_end');
+  if (lines.at(-1)!.value.toUpperCase() !== 'VCARD') throw new VCardStructureError('invalid_end_value');
+  if (lines.filter(l => ['BEGIN', 'END'].includes(l.name)).length !== 2) throw new VCardStructureError('boundary_count');
   const versions = lines.filter(l => l.name === 'VERSION');
   if (versions.length !== 1 || !['3.0', '4.0'].includes(versions[0].value)) throw new DavError(422, 'unsupported_vcard_version');
   const uids = lines.filter(l => l.name === 'UID');
