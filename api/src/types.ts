@@ -21,7 +21,10 @@ export interface AddressEntry {
 }
 
 export interface ContactRow {
+  /** Opaque internal ID; retained for compatibility with existing group references. */
   uid: string;
+  vcard_uid: string;
+  resource_kind: 'contact' | 'group';
   addressbook_id: string;
   href: string | null;
   etag: string;

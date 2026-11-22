@@ -6,6 +6,8 @@ import { hasInvalidEmail, hasInvalidPhone, isInvalidBirthday, createContact } fr
 import type { AuthedRequest } from '../auth/middleware';
 import type { ContactRow } from '../types';
 
+import { withDavLock } from '../davLock';
+
 const router = Router();
 
 const CSV_HEADERS = [
@@ -140,7 +142,7 @@ function parseLabelValuePairs(raw: string): { label: string; value: string }[] {
 interface ImportError { line: number; message: string; }
 
 // POST /api/transfer/import  { addressbook_id, format: 'vcard'|'csv', content: string }
-router.post('/import', async (req: AuthedRequest, res: Response) => {
+router.post('/import', withDavLock(async (req: AuthedRequest, res: Response) => {
   try {
     const { addressbook_id: addressbookId, format, content } = req.body as {
       addressbook_id?: string; format?: string; content?: string;
@@ -217,6 +219,6 @@ router.post('/import', async (req: AuthedRequest, res: Response) => {
     console.error('Transfer operation failed');
     res.status(500).json({ error: 'internal' });
   }
-});
+}));
 
 export default router;
