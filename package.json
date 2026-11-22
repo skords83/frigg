@@ -22,5 +22,11 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.17",
     "@playwright/test": "^1.65.1"
+  },
+  "overrides": {
+    "express": {
+      "qs": "^6.16.2"
+    },
+    "postcss": "^8.5.33"
   }
 }

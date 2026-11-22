@@ -30,7 +30,7 @@ async function assertUnreferenced(source: Snapshot) {
     if (!card.url) throw new DavError(409,'membership_check_failed');
     const native = await client.readVCard(new URL(card.url,source.bookUrl).href);
     if (!native) throw new DavError(409,'membership_check_failed');
-    if (readDocument(native.raw).some(l=>['MEMBER','X-ADDRESSBOOKSERVER-MEMBER','RELATED'].includes(l.name) && [source.uid,`urn:uuid:${source.uid}`].includes(l.value))) throw new DavError(409,'contact_is_referenced');
+    if (readDocument(native.raw).some(l=>['MEMBER','X-ADDRESSBOOKSERVER-MEMBER','RELATED'].includes(l.name) && [source.uid,`urn:uuid:${source.uid}`,source.url].some(ref=>ref===l.value||/^urn:uuid:/i.test(ref)&&ref.toLowerCase()===l.value.toLowerCase()))) throw new DavError(409,'contact_is_referenced');
   }
 }
 async function operationFor(req: AuthedRequest): Promise<StoredOperation> {

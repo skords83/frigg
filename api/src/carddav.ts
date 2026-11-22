@@ -1,7 +1,7 @@
 import { createDAVClient } from 'tsdav';
 import VCF from 'vcf';
 import { projectDocument } from './vcardDocument';
-import { DavError, requireEtag, guardedDavFetch } from './davSafety';
+import { DavError, requireEtag, guardedDavFetch, resourceUrl } from './davSafety';
 import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
 import { query } from './db';
 import { decryptSecret } from './crypto';
@@ -35,12 +35,16 @@ async function buildClient(account: CardDavAccountRow): Promise<DAVClientInstanc
     defaultAccountType: 'carddav',
     fetch: guardedDavFetch(),
   });
+  return withNativeCards(client);
+}
+
+export function withNativeCards(client: DAVClientInstance): DAVClientInstance {
   // Baïkal/sabre converts GET and multiget bodies to vCard 3 by default,
   // even while returning the ETag of the stored vCard 4 resource. Its direct
   // address-data property exposes the original representation without conversion.
   // Fail closed on servers without this capability; a converted card must never
   // become the baseline for a supposedly lossless edit.
-  return Object.assign(client, {
+  const nativeClient = Object.assign(client, {
     readVCard: async (url: string) => {
       const responses = await client.propfind({
         url, depth: '0', props: { 'card:address-data': {}, 'd:getetag': {} },
@@ -53,6 +57,26 @@ async function buildClient(account: CardDavAccountRow): Promise<DAVClientInstanc
       if (typeof raw !== 'string' || !raw) throw new DavError(422, 'native_vcard_unavailable');
       requireEtag(etag);
       return { raw, etag };
+    },
+  });
+  // tsdav's fetchVCards maps away DAV error statuses and can turn a failed
+  // collection query into an empty list. Never use such a list for deletions.
+  return Object.assign(nativeClient, {
+    fetchVCards: async ({ addressBook }: { addressBook: { url: string } }) => {
+      const responses = await client.addressBookQuery({url:addressBook.url,depth:'1',props:{'d:getetag':{}}});
+      if (!Array.isArray(responses) || !responses.length) throw new DavError(503,'invalid_collection_response');
+      const cards = [];
+      for (const response of responses) {
+        if (!response.ok || response.error) throw new DavError(503,'collection_unavailable');
+        // tsdav represents a valid, empty DAV multistatus by this sentinel.
+        if (!response.href && response.status === 207 && !response.raw) continue;
+        if (!response.href || !response.raw?.multistatus) throw new DavError(503,'invalid_collection_response');
+        const url = resourceUrl(addressBook.url,response.href);
+        const native = await nativeClient.readVCard(url);
+        if (!native) throw new DavError(409,'collection_changed');
+        cards.push({url,data:native.raw,etag:native.etag});
+      }
+      return cards;
     },
   });
 }

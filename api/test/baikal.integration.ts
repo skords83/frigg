@@ -20,7 +20,7 @@ import {patchGroup,readGroup} from '../src/groupCard';
 import { runSync } from '../src/sync';
 import { getClientForAccount } from '../src/carddav';
 import { buildVCard } from '../src/contactOps';
-import { patchDocument } from '../src/vcardDocument';
+import { patchDocument,foldLine } from '../src/vcardDocument';
 
 async function unusedPort() {const server=createServer();await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const port=(server.address() as {port:number}).port;await new Promise<void>(r=>server.close(()=>r()));return port;}
 
@@ -48,7 +48,7 @@ test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move,
     const client=await getClientForAccount(accountId);
     const books=await client.fetchAddressBooks();assert.equal(books.length,2);
     const bookA=books.find((b:{url:string})=>b.url.endsWith('/a/')),bookB=books.find((b:{url:string})=>b.url.endsWith('/b/'));
-    await client.createVCard({addressBook:bookA,filename:'arbitrary-name',vCardString:buildVCard({uid:'shared-uid',fn:'Synthetic',phones:[{label:'mobil',value:'+123'}]})});
+    await client.createVCard({addressBook:bookA,filename:'arbitrary-name',vCardString:buildVCard({uid:'shared-uid',fn:'Synthetic',phones:[{label:'mobil',value:'+123'}]}).replace('END:VCARD',foldLine('X-LONG:'+('ä'.repeat(6000)))+'\r\nEND:VCARD')});
     await client.createVCard({addressBook:bookB,filename:'other-name',vCardString:buildVCard({uid:'shared-uid',fn:'Different book'})});
     const sync=await runSync();assert.equal(sync.errors,0);assert.equal(sync.synced,2);
     const stored=(await db.query<{uid:string;addressbook_id:string;href:string;etag:string}>('SELECT * FROM contacts ORDER BY fn')).rows;
@@ -65,6 +65,7 @@ test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move,
     const after=await updated.json();assert.notEqual(after.etag,edit.etag);
     const conflict=await call(`/api/contacts/${contact.uid}`,'PUT',{note:'Stale edit'},edit.etag);assert.equal(conflict.status,409);assert.equal((await conflict.json()).server.note,'Web edit');
     const external=await client.readVCard(contact.href);
+    assert.ok(external.raw.replace(/\r\n[ \t]/g,'').includes('X-LONG:'+'ä'.repeat(6000)));
     await client.updateVCard({vCard:{url:contact.href,etag:external.etag,data:patchDocument(external.raw,{org:'External client'})}});
     const unsynced=await call(`/api/contacts/${contact.uid}`,'PUT',{note:'Do not overwrite'},after.etag);assert.equal(unsynced.status,409);assert.equal((await unsynced.json()).server.org,'External client');
     await db.query("INSERT INTO users(id,email,password_hash) VALUES ('00000000-0000-0000-0000-000000000003','other@example.invalid','test-only');");
@@ -92,6 +93,7 @@ test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move,
       assert.equal(create.status,201,await create.clone().text());let group=await create.json();
       const add=await call(`/api/carddav-groups/${group.id}/members`,'POST',{contact_uid:member.uid},group.etag);assert.equal(add.status,200,await add.clone().text());group=await add.json();assert.deepEqual(group.member_uids,[member.uid]);
       const again=await call(`/api/carddav-groups/${group.id}/members`,'POST',{contact_uid:member.uid},group.etag);assert.equal(again.status,200);group=await again.json();assert.equal(group.member_uids.length,1);
+      const referencedMove=await call('/api/operations/preview','POST',{kind:'move',source_uid:member.uid,target_book_id:localBooks.find(b=>b.url===bookB.url)!.id});assert.equal(referencedMove.status,409);assert.equal((await referencedMove.json()).error,'contact_is_referenced');
       const internal=group.id.replace('dav:','');const row=(await db.query<{href:string}>('SELECT href FROM contacts WHERE uid=$1',[internal])).rows[0];
       const externalGroup=await client.readVCard(row.href);
       await client.updateVCard({vCard:{url:row.href,etag:externalGroup.etag,data:patchGroup(externalGroup.raw,{name:'Second client'})}});

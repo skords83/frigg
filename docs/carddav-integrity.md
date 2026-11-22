@@ -306,3 +306,77 @@ Nachweis nicht. Vor Freigabe sind mindestens Download/Upload einer Gruppe, exter
 Rename, Mitgliedschaft und Löschung mit der vorgesehenen DAVx⁵-/Android-Konfiguration
 an synthetischen Kontakten zu prüfen. Ebenso offen: nativer PostgreSQL-Mehrprozess-
 Lasttest, weitere CardDAV-Server und vollständige mobile Navigation (bisher Dialogtests).
+
+## PR 5: abschließende Regressionen und mobile Bedienung (22.11.2026)
+
+Die Sammlungsliste von tsdav kann HTTP-/XML-Fehler in ein leeres Ergebnis umformen.
+Frigg verwendet deshalb eine geprüfte Sammlungsliste und native Einzelressourcen.
+HTTP-Fehler, ungültige XML-Antworten, verschwundene Ressourcen und fehlende starke
+ETags brechen ab; sie dürfen keinen erfolgreichen leeren Abgleich auslösen.
+Auch Request-Objekte durchlaufen die Schreibbedingungsprüfung. Referenzen beim
+Move/Merge berücksichtigen zusätzlich Ressourcen-URLs und UUID-Großschreibung.
+
+Unter 900 px sind die vorhandenen drei Bereiche einzeln über Navigation/Kontakte/
+Details erreichbar. Der Desktop bleibt dreispaltig. Verschieben ist auf Touchgeräten
+über eine Adressbuchauswahl bedienbar. Löschfehler lassen den Kontakt sichtbar und
+zeigen eine Meldung; der vorhandene Bestätigungsdialog blockiert die Oberfläche
+nach einem fehlgeschlagenen Löschen nicht länger. Gruppen-Netzwerkfehler werden
+angezeigt, unbekannte bzw. fremdbuchige Gruppen nicht zur Zuordnung angeboten.
+Lokale Gruppenfehler loggen keine vollständigen Datenbankfehlermeldungen mehr.
+
+### Letzter lokaler Teststand
+
+- `npm test`: **68 Tests erfolgreich**, einschließlich Migrationen, Parser,
+  bedingtem Transport, Sync-Abbrüchen, Konfliktentscheidungen und Journallebenszyklus.
+- `npm run test:baikal` mit isoliertem Release/PHP: **erfolgreich**. Zusätzlich
+  Erhalt einer unbekannten Unicode-Eigenschaft mit mehr als 12 KB durch Bearbeitung
+  und Sperre des Verschiebens referenzierter Gruppenmitglieder nachgewiesen.
+- `npm run test:browser`: **11 Tests erfolgreich**. Desktop und mobiler Einstieg,
+  wiederholter Bearbeitungskonflikt, Abbruch/offline, Merge-Entscheidung, Move-Teilfehler,
+  Gruppenanlage/-mitgliedschaft/-konflikt und fehlende Gruppenunterstützung.
+- `npm run build`: **API und Next.js-Produktionsbuild erfolgreich**.
+- `git diff --check`: erfolgreich. Screenshots von mobilem Kontakt, Konflikt,
+  Merge und Gruppenanlage visuell geprüft. CI archiviert nur synthetische Testbilder
+  und Fehler-Traces für sieben Tage; keine produktiven Daten.
+- Während der Entwicklung schlug der neue mobile Test zunächst wegen eines
+  mehrdeutigen Alert-Selektors fehl, anschließend wegen des blockierenden
+  Bestätigungsdialogs. Selektor und tatsächlicher Dialogfehler sind behoben.
+  Dev-Server-Meldungen zu abgebrochenen Testanfragen sind kein Nachweis eines
+  produktiven Fehlers; Tests und anschließender Produktionsbuild bestehen.
+
+### Abhängigkeiten und Sicherheitsprüfung
+
+Vorher meldete `npm audit` 13 Befunde (2 kritisch, 6 hoch, 5 moderat). Updates innerhalb
+von Next.js 15 (15.5.29) und der bestehenden Abhängigkeiten sowie begrenzte Overrides
+für PostCSS 8.5.33 und Express' qs 6.17.1 reduzieren dies auf **2 moderate Befunde**,
+keine hohen/kritischen. `npm ci` und Build/Test wurden mit dem aktualisierten Lockfile
+geprüft. Keine neue Laufzeitarchitektur und kein Framework-Major-Upgrade.
+
+Offen bleibt [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)
+im bestehenden node-cron→uuid-Pfad (Audit zählt beide Pakete). Der geprüfte Scheduler
+verwendet `uuid.v4()` ohne benutzerdefinierten Puffer; die Meldung betrifft v3/v5/v6
+mit Puffer. Dies ist eine begrenzte Erreichbarkeitsbewertung, keine allgemeine
+Sicherheitsfreigabe. Ein Scheduler-Major-Upgrade wurde nicht ungeprüft erzwungen.
+
+### Abnahmestand und Review-Reihenfolge
+
+| Bereich | Stand | Verbleibende Grenze |
+| --- | --- | --- |
+| A Konflikte | Bedingte Writes/Deletes, Drei-Wege-Dialog, erneute Konflikte getestet | Server muss starke ETags und Preconditions korrekt durchsetzen |
+| B vCards | Unbekannte Daten, Parameter, Faltung, Unicode und strukturierte Bestandteile erhalten | Nicht sicher interpretierbare Änderungen werden abgewiesen |
+| C Merge | Vorschau, Feldentscheidung, echte Übernahme, Journal/Wiederaufnahme | Mehrdeutige unbekannte Daten und referenzierte Quellen blockieren |
+| D Move | Ziel erstellen/verifizieren, Quelle bedingt löschen, Journal/Idempotenz | CardDAV bietet keine atomare Mehrressourcen-Transaktion |
+| E Gruppen | Beide Formate auf echtem Baïkal getestet; lokale/intelligente Gruppen erhalten | **Android/DAVx⁵-Ende-zu-Ende-Test offen** |
+| Migrationen | 005/006 additiv und wiederholt auf synthetischem Bestand getestet | Wiederherstellung über geprüfte Backups; kein destruktives Down-Skript |
+| Gestaltung | Bestehende Farben/Typografie/Listen, Desktop und mobile Abläufe geprüft | Chromium geprüft; keine vollständige Browser-/Gerätematrix |
+| Sicherheit | Session-/Benutzer-/Buchzugriff geprüft, konditionale Writes, Logs reduziert | Zwei moderate Audit-Meldungen; kein externer Sicherheitstest |
+
+Die Draft-PRs bauen aufeinander auf: **#1 → #2 → #3 → #4 → #5**. Nicht einzeln
+produktiv ausrollen: erst den vollständigen Stapel prüfen, anschließend die
+Migrations- und Wiederherstellungsanleitung beachten. PR 5 korrigiert insbesondere
+Sammlungsfehler und vervollständigt die mobile Bedienung.
+
+Der Gesamtauftrag ist wegen des offenen realen DAVx⁵-/Android-Nachweises noch nicht
+vollständig abgenommen. Ein nativer PostgreSQL-Mehrprozess-Test sowie Tests weiterer
+Server bleiben zusätzliche offene Nachweise. Es wurden keine produktiven Kontakte
+verändert, kein Deployment ausgeführt und kein PR gemergt.
