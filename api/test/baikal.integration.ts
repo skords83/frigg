@@ -9,6 +9,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import { PGlite } from '@electric-sql/pglite';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
+import { nativeConcurrency } from './nativePostgresScenarios';
 import { pool } from '../src/db';
 import { encryptSecret } from '../src/crypto';
 import { requireAuth,requireActive } from '../src/auth/middleware';
@@ -24,12 +25,14 @@ import { patchDocument,foldLine } from '../src/vcardDocument';
 
 async function unusedPort() {const server=createServer();await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const port=(server.address() as {port:number}).port;await new Promise<void>(r=>server.close(()=>r()));return port;}
 
-test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move, merge and identities', {skip:!process.env.FRIGG_BAIKAL_RELEASE, timeout:60_000},async()=>{
+test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move, merge and identities', {skip:!process.env.FRIGG_BAIKAL_RELEASE, timeout:120_000},async()=>{
   const root=resolve(process.cwd(),process.cwd().endsWith('/api')?'..':'.');
   const data=await mkdtemp(join(tmpdir(),'frigg-baikal-run-'));
   const port=await unusedPort(),url=`http://127.0.0.1:${port}/dav.php/`;
   const php=spawn(process.env.FRIGG_TEST_PHP??'php',[...(process.env.FRIGG_TEST_PHP_EXT?['-n','-d',`extension_dir=${process.env.FRIGG_TEST_PHP_EXT}`,'-d','extension=pdo_sqlite']:[]),'-d','display_errors=0','-S',`127.0.0.1:${port}`,join(root,'tests/integration/baikal-router.php')],{env:{...process.env,FRIGG_BAIKAL_DATA:data},stdio:'ignore'});
-  const db=new PGlite({extensions:{pg_trgm}});
+  const native = process.env.FRIGG_NATIVE_PG;
+  if (native && (!native.startsWith('/tmp/frigg-native-pg-') || process.env.PGHOST !== native || process.env.PGDATABASE !== 'frigg_synthetic' || process.env.DATABASE_URL)) throw new Error('isolated cluster required');
+  const db: { query<T extends Record<string, any> = Record<string, any>>(sql: string, args?: any[]): Promise<{rows:T[];affectedRows?:number}>; exec(sql:string):Promise<unknown>; close():Promise<void> } = native ? { query: pool.query.bind(pool), exec: (sql: string) => pool.query(sql), close: () => pool.end() } : new PGlite({extensions:{pg_trgm}});
   const originalQuery=pool.query,originalConnect=pool.connect;
   let server:ReturnType<ReturnType<typeof express>['listen']>|undefined;
   const userId='00000000-0000-0000-0000-000000000001',accountId='00000000-0000-0000-0000-000000000002';
@@ -38,8 +41,10 @@ test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move,
     for(let i=0;i<50;i++){try {if((await fetch(`http://127.0.0.1:${port}/healthz`)).ok)break;}catch{}await new Promise(r=>setTimeout(r,100));}
     for(const file of (await readdir(join(root,'db/migrations'))).filter(f=>f.endsWith('.sql')).sort())await db.exec(await readFile(join(root,'db/migrations',file),'utf8'));
     const sql=async(text:string,args:unknown[]=[])=>{const result=await db.query(text,args);return{rows:result.rows,rowCount:result.affectedRows??result.rows.length};};
-    pool.query=sql as typeof pool.query;
-    pool.connect=(async()=>({query:sql,release:()=>{}})) as typeof pool.connect;
+    if (!native) {
+      pool.query=sql as typeof pool.query;
+      pool.connect=(async()=>({query:sql,release:()=>{}})) as typeof pool.connect;
+    }
     process.env.CREDENTIALS_ENCRYPTION_KEY=Buffer.alloc(32,7).toString('base64');
     const secret=encryptSecret('synthetic-only');
     await db.query("INSERT INTO users(id,email,password_hash) VALUES ($1,'synthetic@example.invalid','test-only')",[userId]);
@@ -96,16 +101,22 @@ test('real Baikal 0.13 + PostgreSQL engine: authenticated CRUD, conflicts, move,
       const referencedMove=await call('/api/operations/preview','POST',{kind:'move',source_uid:member.uid,target_book_id:localBooks.find(b=>b.url===bookB.url)!.id});assert.equal(referencedMove.status,409);assert.equal((await referencedMove.json()).error,'contact_is_referenced');
       const internal=group.id.replace('dav:','');const row=(await db.query<{href:string}>('SELECT href FROM contacts WHERE uid=$1',[internal])).rows[0];
       const externalGroup=await client.readVCard(row.href);
-      await client.updateVCard({vCard:{url:row.href,etag:externalGroup.etag,data:patchGroup(externalGroup.raw,{name:'Second client'})}});
+      await client.updateVCard({vCard:{url:row.href,etag:externalGroup.etag,data:patchGroup(externalGroup.raw,{name:'Second client'}).replace('END:VCARD', (format==='apple'?'X-ADDRESSBOOKSERVER-MEMBER':'MEMBER')+':urn:uuid:unknown-synthetic\r\nEND:VCARD')}});
       const conflictGroup=await call(`/api/carddav-groups/${group.id}`,'PATCH',{name:'Stale rename'},group.etag);assert.equal(conflictGroup.status,409);group=(await conflictGroup.json()).server;assert.equal(group.name,'Second client');
+      const rename=await call(`/api/carddav-groups/${group.id}`,'PATCH',{name:'Frigg rename'},group.etag);assert.equal(rename.status,200);group=await rename.json();assert.equal(group.name,'Frigg rename');
       const missing=await call(`/api/carddav-groups/${group.id}/members`,'POST',{contact_uid:'missing'},group.etag);assert.equal(missing.status,404);
       const removed=await call(`/api/carddav-groups/${group.id}/members/${member.uid}`,'DELETE',undefined,group.etag);assert.equal(removed.status,200);group=await removed.json();assert.equal(group.member_uids.length,0);
-      const rawGroup=await client.readVCard(row.href);assert.equal(readGroup(rawGroup.raw)?.format,format);
+      const rawGroup=await client.readVCard(row.href);assert.equal(readGroup(rawGroup.raw)?.format,format);assert.ok(rawGroup.raw.includes(':urn:uuid:unknown-synthetic'));
+      assert.ok(rawGroup.raw.includes('FN:Frigg rename'));
+      await db.query("UPDATE contacts SET resource_kind='contact' WHERE uid=$1",[internal]);
+      await db.exec(await readFile(join(root,'db/migrations/006_carddav_groups.sql'),'utf8'));
       assert.equal((await runSync(true)).errors,0);
+      assert.equal((await db.query('SELECT resource_kind FROM contacts WHERE uid=$1',[internal])).rows[0].resource_kind,'group');
       const list=await(await call('/api/groups')).json();assert.ok(list.some((g:{id:string})=>g.id===group.id));assert.ok(list.some((g:{name:string})=>g.name==='Keep membership'));
       const contacts=await(await call('/api/contacts')).json();assert.equal(contacts.some((c:{uid:string})=>c.uid===internal),false);
       assert.equal((await call(`/api/carddav-groups/${group.id}`,'DELETE',undefined,group.etag)).status,204);
     }
+    if (native) await nativeConcurrency({ root, call, db, client, bookA: contact.addressbook_id, bookB: localBooks.find(b=>b.url===bookB.url)!.id, data });
     await db.query("UPDATE addressbooks SET sync_token='invalid-token',ctag=NULL");
     assert.equal((await runSync()).errors,0);
   } finally {

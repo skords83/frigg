@@ -381,3 +381,291 @@ Der Gesamtauftrag ist wegen des offenen realen DAVx⁵-/Android-Nachweises noch 
 vollständig abgenommen. Ein nativer PostgreSQL-Mehrprozess-Test sowie Tests weiterer
 Server bleiben zusätzliche offene Nachweise. Es wurden keine produktiven Kontakte
 verändert, kein Deployment ausgeführt und kein PR gemergt.
+
+## Abschließende technische Abnahme – 22.11.2026
+
+Dieser Abschnitt ersetzt die oben historisch aufgeführten offenen Teststände, soweit
+hier neue Nachweise angegeben sind. Basis war der saubere Head von PR #5,
+`c1baefd5cc0db598e7e8f3bdf4e0b558800282ac`. Alle fünf PRs sind offen und Draft;
+Bases/Heads bilden unverändert #1 → #2 → #3 → #4 → #5. Ergänzungen bleiben in #5:
+Testinfrastruktur, konkrete Testlücken, eine begrenzte Logkorrektur und Dokumentation.
+Keine neue Produktfunktion, keine Gestaltung geändert. Kein Merge/Deployment.
+
+### Ausgangsmessung und abschließende Regression
+
+Vor Änderungen erneut erfolgreich: `npm ci`, 69 Unit-/HTTP-/Migrationstests,
+11 Chromium-Browsertests, echte isolierte Baïkal-Integration und API/Web-Build.
+Der CI-Lauf des Ausgangs-Heads war erfolgreich:
+[Integrity tests #12](https://github.com/skords83/frigg/actions/runs/44992967017).
+Die abschließenden Prüfungen werden am Ende dieses Abschnitts protokolliert.
+
+Alle Kontakte, Benutzer, Sitzungen und DAV-Zugangsdaten sind synthetisch. Der
+native Test erzeugt seinen eigenen Unix-Socket-Cluster unter `/tmp/frigg-native-pg-*`,
+verwirft geerbte Verbindungsparameter, akzeptiert keine `DATABASE_URL`, bindet
+keinen PostgreSQL-TCP-Port und entfernt den Cluster beim Ende. Er startet nur
+einen eigenen temporären Baïkal; bestehende Baïkal-Instanzen werden nicht geändert.
+
+### Nativer PostgreSQL-Mehrprozess-Nachweis
+
+`npm run test:postgres` verwendet echte PostgreSQL-Verbindungen und unabhängige
+Node-Prozesse mit den echten Express-Routen, Authentifizierung, Operationsengine
+und Synchronisation. Die DAV-Anfragen gehen an den echten isolierten Baïkal.
+Testbarrieren halten gezielt Requests/Checkpoints an; sie ersetzen weder SQL noch
+DAV-Ergebnisse. Fehler werden durch SIGKILL und `pg_terminate_backend` erzeugt.
+
+Lokal geprüft mit PostgreSQL **18.7**, Baïkal **0.13.0**, Node **26.13.1**.
+Der CI-Schritt verwendet PostgreSQL **16**, passend zu `compose.yaml`, und Node 22.
+Lokaler Erfolg auf 18 ist allein kein Nachweis für Version 16; dessen Nachweis ist
+separat über den ergänzten CI-Lauf zu prüfen.
+
+| Automatisiertes Szenario | Ergebnis / überprüfte Invariante |
+| --- | --- |
+| Zwei API-Prozesse bearbeiten denselben Kontakt | BESTANDEN: Gewinner 200; paralleler Schreiber 423; spätere veraltete Version 409; Gewinnerinhalt bleibt erhalten |
+| Sync während angehaltener Kontaktänderung | BESTANDEN: separater Sync-Prozess übernimmt die Sperre nicht, keine parallelen Schreibzugriffe |
+| Zwei Prozesse setzen denselben Move fort | BESTANDEN: zweiter Prozess 423, danach idempotent 200 ohne weiteres DAV-PUT/DELETE |
+| Merge während laufendem Sync | BESTANDEN: Merge zunächst 423; Sync überspringt Bücher mit aktivem Journal; Merge danach vollständig |
+| SIGKILL nach Ziel-PUT vor Verifikationscheckpoint | BESTANDEN: Journal bleibt `writing`; neuer Prozess liest vorhandenes Ziel, kein zweites PUT, genau ein erfolgreiches DELETE |
+| Verlust der separaten Sperrverbindung | BESTANDEN: betroffener API-Prozess beendet sich mit Fehler; Sperre frei; neuer Prozess setzt denselben Vorgang fort |
+| Abbruch einer tatsächlich laufenden DB-Abfrage | BESTANDEN: Backend-Terminierung im Checkpoint; HTTP 503, `last_error=operation_unconfirmed`; Wiederaufnahme ohne zusätzliches PUT |
+| SIGKILL nach Quellenlöschung | BESTANDEN: `target_verified` bleibt nachvollziehbar; Wiederaufnahme ohne erneutes DELETE |
+| SIGKILL nach lokalem Commit | BESTANDEN: `source_deleted`; erneuter lokaler Abschluss konsistent, kein zusätzliches DAV-Schreiben |
+| PostgreSQL-Neustart | BESTANDEN: vollständige Journalzeilen einschließlich Snapshots unverändert |
+| Lock-Timeout / Deadlock | BESTANDEN: native Sessions liefern 55P03 / 40P01, anschließend keine verbliebene Frigg-Sperre |
+| Backup und Restore | BESTANDEN: pg_dump/pg_restore in neue DB; Kontakte, Bücher, lokale Gruppen, Mitgliedschaften und Journal zeilenweise identisch |
+
+Die Deadlock-Probe erzeugt einen absichtlichen Zyklus mit separaten Test-Locks;
+sie behauptet keinen gefundenen Deadlock in Frigg. Friggs einzelner globaler
+`pg_try_advisory_lock` wartet bei Konkurrenz nicht. Dies ist ein deterministischer
+Integritäts-/Ausfalltest, kein Durchsatz- oder Langzeitlasttest. Beim Verlust der
+Sperrverbindung ist derzeit der Prozessabbruch die Schutzwirkung des nicht
+abgefangenen `pg`-Clientfehlers. Ein Prozessmanager muss ihn neu starten
+(`restart: unless-stopped` ist vorhanden); Journale werden anschließend ausdrücklich
+wiederaufgenommen. Ein künftiges Abfangen dieses Fehlers darf den Handler nicht
+ohne Sperre weiterlaufen lassen. Ein stiller Netzwerkausfall ohne sofortige
+TCP-Fehlermeldung und beliebig lange Netzpartitionen wurden nicht simuliert.
+
+Reproduktion (PostgreSQL-Server/Client einschließlich `pg_trgm`, PHP mit SQLite,
+Python 3, npm-Abhängigkeiten; als unprivilegierter Benutzer):
+
+```sh
+npm ci
+bash tests/integration/download-baikal.sh /tmp/frigg-baikal-test
+FRIGG_BAIKAL_RELEASE=/tmp/frigg-baikal-test/baikal \
+FRIGG_TEST_PG_BIN="$(pg_config --bindir)" npm run test:postgres
+```
+
+Bei lokal entpackten Laufzeiten zusätzlich `FRIGG_TEST_PHP`,
+`FRIGG_TEST_PHP_EXT` und deren `LD_LIBRARY_PATH` setzen. Kein produktiver
+Verbindungsstring erforderlich oder erlaubt. Der Lauf muss die `POSTGRES PASS:`-
+Zeilen und abschließend einen bestandenen Test ohne Skip enthalten.
+
+### Gefundene Probleme und konkrete Ergänzungen
+
+- **Sicherheitskorrektur:** `api/src/db.ts` protokollierte im Pool-Fehlerhandler
+  das vollständige Fehlerobjekt. Der echte Server-Neustart zeigte darin ein
+  angehängtes Clientobjekt mit internen Verbindungs-/Authentifizierungsdetails.
+  Stattdessen wird jetzt nur eine feste Fehlermeldung ausgegeben; das Verwerfen
+  der defekten Verbindung durch pg bleibt unverändert.
+- **Baïkal-Testlücken geschlossen:** erfolgreiche Umbenennung aus Frigg und Erhalt
+  einer extern eingefügten unbekannten MEMBER-Referenz über Umbenennen und
+  Entfernen eines bekannten Mitglieds, jeweils vCard 4 und Apple/vCard 3.
+  Ein absichtlich als Kontakt gecachter Gruppeneintrag wird nach erneuter 006 und
+  Sync wieder als Gruppe klassifiziert. Vorhandene CRUD-, Konflikt-, Rechte- und
+  lokalen Gruppentests bleiben bestehen.
+- **Testgerüst korrigiert:** Baïkal entfernt gegebenenfalls den abschließenden
+  Zeilenumbruch; die Ergebnisprüfung toleriert genau diesen Unterschied.
+  Der Neustart benötigte eine eigene Server-Logdatei und die Verarbeitung der
+  geschlossenen Pool-Sockets vor Wiederbenutzung. Diese anfänglich fehlgeschlagenen
+  Testläufe sind keine Produktfehler und wurden nicht als Erfolg gezählt.
+
+### Sicherheitsbewertung der verbleibenden Audit-Meldungen
+
+Erneut: **zwei moderate Meldungen**, null hoch/kritisch. Installiert sind
+`node-cron@3.0.3 → uuid@8.3.2`. `npm view node-cron versions` zeigt kein neueres
+3.x-Release; das Audit schlägt `node-cron@4.6.0` als Major-Wechsel vor.
+Die Advisory [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)
+betrifft v3/v5/v6-Aufrufe mit externem Buffer/Offset; behoben u.a. in uuid 11.1.1.
+Das wäre gegenüber uuid 8 ebenfalls ein Major-Wechsel außerhalb des bisherigen
+Abhängigkeitsvertrags. Kein ungeprüftes Upgrade und kein UUID-Override vorgenommen.
+
+Tatsächlicher Pfad: `api/src/sync.ts:startSyncSchedule` →
+`cron.schedule('*/5 * * * *', callback)` →
+`node-cron/src/scheduled-task.js` → `uuid.v4()` ohne Argumente.
+Auch die Namens-Fallbacks in `storage.js` und
+`background-scheduled-task/index.js` verwenden ausschließlich `v4()` ohne Buffer.
+Frigg verwendet den Background-Task-Pfad nicht. Anwendungscode ruft keine
+UUID-v3/v5/v6-Funktion auf; Kontaktinhalte werden diesem Pfad nicht übergeben.
+**Der gemeldete Fehler ist in diesen geprüften Aufrufpfaden nicht erreichbar.**
+Die Abhängigkeit bleibt jedoch betroffen und `npm audit` bleibt nicht erfolgreich;
+der Befund ist ausdrücklich **nicht behoben**. Neue Scheduler-Nutzung oder ein
+Abhängigkeitswechsel erfordern eine erneute Bewertung.
+
+### Manueller Android-/DAVx⁵-Abnahmetest – noch nicht ausgeführt
+
+`adb devices` fand kein Gerät; kein installierter Emulator/AVD in den geprüften
+SDK-Verzeichnissen. **Die vollständige DAVx⁵-/Android-Kompatibilität ist OFFEN.**
+Protokolltests und Quellenprüfung ersetzen den Gerätetest nicht.
+
+1. Isolierte Baïkal-Testinstanz beziehungsweise ausdrücklich separates Testkonto
+   mit neuem Adressbuch „Frigg Abnahme“ einrichten. Nur dieses Konto in einer
+   isolierten Frigg-Testinstallation verbinden. Keine Familienkonten einbinden.
+   Für das Smartphone eine erreichbare HTTPS-URL mit gültigem Zertifikat verwenden;
+   `127.0.0.1` auf dem Telefon wäre das Telefon selbst.
+2. In DAVx⁵ neues Konto mit Test-URL `/dav.php/` (installationsabhängig
+   `/html/dav.php/`) und Testzugangsdaten anlegen. Unter Kontaktgruppenmethode
+   **„Gruppen sind separate vCards“** wählen, nicht CATEGORIES. Nur das
+   Testadressbuch aktivieren, Kontakteberechtigung erteilen, manuell synchronisieren.
+3. In der Kontakte-App nur das DAVx⁵-Testadressbuch anzeigen und es beim Anlegen
+   ausdrücklich als Speicherort wählen, nicht Telefon/Google/anderes Konto.
+   Prüfen, dass diese App Gruppen/Labels dieses Kontos anzeigen **und bearbeiten**
+   kann. Fehlende Funktionen als App-Einschränkung erfassen; nicht automatisch
+   DAVx⁵ oder Frigg zuschreiben. DAVx⁵ synchronisiert; die Kontakte-App stellt
+   Android-Kontakte und Gruppen dar und bearbeitet sie.
+4. In Frigg „Test Ada“ und „Test Berta“ mit `.invalid`-Mailadressen anlegen, Gruppe
+   „Test Team“ erstellen und Ada zuordnen. DAVx⁵ synchronisieren: beide Kontakte
+   genau einmal, eine Gruppe, ausschließlich Ada als Mitglied. Gruppen-vCard
+   darf nicht als normaler Personenkontakt erscheinen.
+5. In der Android-App Berta hinzufügen und Ada entfernen. DAVx⁵ synchronisieren,
+   danach Frigg-Sync ausführen: genau Berta ist Mitglied. Anschließend in Frigg
+   die Gegenänderung durchführen und auf Android prüfen.
+6. Gruppe auf Android umbenennen, synchronisieren und in Frigg prüfen. Danach
+   in Frigg erneut umbenennen und Android prüfen. Zusätzlich eine zweite Gruppe
+   auf Android anlegen, Kontakte zuordnen und in Frigg prüfen.
+7. Je eine Gruppe auf jeder Seite löschen und in beide Richtungen synchronisieren.
+   Gruppen verschwinden, Personenkontakte bleiben erhalten. Drei weitere
+   Sync-Durchläufe dürfen weder Gruppen noch Mitgliedschaften wiederherstellen.
+8. Optional kontrollierter Konkurrenzfall: Frigg-Dialog offen lassen, dieselbe
+   Gruppe auf Android ändern und synchronisieren, dann den alten Dialog speichern.
+   Erwartet: sichtbarer Versionskonflikt, keine stille Überschreibung. Erneut
+   laden und die gewünschte Änderung mit aktueller Version ausführen.
+9. Protokoll: Android-Version/Gerät, DAVx⁵-Version, Kontakte-App/Version,
+   Baïkal-Version, Gruppenmethode, Frigg-Commit, Zeitpunkt, Aktion/Richtung,
+   Soll/Ist, synthetische Screenshots und gegebenenfalls bereinigte Sync-Logs.
+   Für jede Aktion BESTANDEN/FEHLGESCHLAGEN/OFFEN eintragen. Mit anderer App
+   wiederholen, wenn nur deren Gruppenbedienung fehlt; beide Ergebnisse erhalten.
+
+Aktuell geprüfte Herstellerquellen:
+[Baïkal-Einstellungen](https://www.davx5.com/tested-with/baikal) und
+[Aufgabenteilung und Gruppenunterstützung](https://www.davx5.com/faq/cant-manage-groups-on-device).
+
+### Kontrollierte Produktionsmigration – ausschließlich später manuell
+
+Der folgende Ablauf wurde **nicht produktiv ausgeführt**. Synthetisch erprobt sind
+native 005/006, Wiederholung, Erhalt alter IDs/Mitgliedschaften, UID-Eindeutigkeit,
+Gruppen-Reklassifikation, PostgreSQL-Dump/Restore und SQLite-Backup mit
+Integritäts- und Inhaltsvergleich. Die tatsächliche Produktionsumgebung und deren
+Backups müssen vor Freigabe separat geprüft werden.
+
+1. Wartungsfenster festlegen, Benutzerzugriffe sperren. **Alle API-Replikate und
+   Sync-/Worker-Prozesse anhalten**, automatischen Neustart alter Container und
+   automatische Deployments verhindern. Web ebenfalls stoppen. Auch externe
+   DAV-Clients pausieren bzw. Test-/Wartungszugriff auf Baïkal begrenzen, damit
+   beide Sicherungen denselben ruhenden Datenstand abbilden. Offene Journale und
+   ihre Zustände dokumentieren; vor Migration vorzugsweise kontrolliert abschließen.
+2. PostgreSQL mit `pg_dump --format=custom --file=frigg-before.dump "$BACKUP_DB_URL"`
+   sichern; notwendige Rollen/Grants separat sichern. Variable bewusst auf die
+   freigegebene Instanz setzen, nie aus dieser Testanleitung ableiten. Geschützte
+   Dateirechte (`umask 077`), verschlüsselte Ablage und Prüfsummen verwenden.
+   Commit/Image-Digests, Schema-Stand, Bestandszahlen und Sicherungszeit erfassen.
+3. Baïkal vollständig sichern: SQL-Datenbank (SQLite über konsistentes Backup,
+   bei MySQL/MariaDB deren passendes Dumpverfahren), Konfiguration/Specific,
+   Authentifizierungsdaten und erforderliche Dateien. Ein vCard-Export allein
+   ersetzt keine vollständige Wiederherstellung. Friggs
+   `CREDENTIALS_ENCRYPTION_KEY` separat sicher aufbewahren; ohne ihn sind die
+   gespeicherten DAV-Zugangsdaten nicht nutzbar.
+4. **Vor Migration Wiederherstellbarkeit beweisen:** PostgreSQL in neue isolierte
+   Datenbank mit `pg_restore --exit-on-error` zurückspielen, Baïkal in isolierter
+   Instanz wiederherstellen. Anzahl und Inhalte der Kontakte, UIDs/hrefs, Gruppen,
+   Mitgliedschaften, Kontenzuordnung und Journale vergleichen. Testinstanz darf
+   keine Produktions-DAV-URLs erreichen. Backup-Existenz allein genügt nicht.
+5. Bestehenden Schema-Stand prüfen. Bei vorhandenen 001–004 nur 005, danach 006
+   ausführen, jeweils `psql -X -v ON_ERROR_STOP=1 "$MIGRATION_DB_URL" -f DATEI`.
+   Bei leerer Datenbank 001–006 in Reihenfolge. **001–004 nicht blind wiederholen**;
+   sie sind nicht insgesamt idempotent. Bestehende Docker-Volumes führen
+   `/docker-entrypoint-initdb.d` nicht erneut aus. 005 und 006 haben eigene
+   Transaktionen. 006 ist datenverträglich wiederholbar, setzt aber bei jeder
+   Ausführung CTag/Sync-Token zurück; sie ist kein wirkungsloser No-op.
+6. API und Web auf zusammengehörige geprüfte Image-Digests aktualisieren, beide
+   zunächst angehalten lassen. **Alter Frigg-Code darf nach 005 niemals schreibend
+   auf den migrierten Bestand zugreifen**, auch nicht über eine vergessene Replik.
+7. Bei weiterhin gestoppter API prüfen: alte `contacts.uid` unverändert,
+   `vcard_uid` befüllt, keine doppelten `(addressbook_id,vcard_uid)`, unveränderte
+   lokale Gruppenmitgliedschaften, gültige Journalzustände, starke ETags/hrefs.
+   006 klassifiziert Gruppen erst beim anschließenden Sync neu; temporär als
+   Kontakt gecachte Gruppen dürfen nicht vorher zur Bearbeitung freigegeben werden.
+   Beispielprüfungen:
+
+   ```sql
+   SELECT count(*) FROM contacts WHERE vcard_uid IS NULL;
+   SELECT addressbook_id,vcard_uid,count(*) FROM contacts
+     GROUP BY addressbook_id,vcard_uid HAVING count(*)>1;
+   SELECT count(*) FROM contact_group_members m
+     LEFT JOIN contacts c ON c.uid=m.contact_uid WHERE c.uid IS NULL;
+   SELECT status,count(*) FROM contact_operations GROUP BY status;
+   ```
+
+   Die ersten drei Resultate müssen null/leer sein; Bestandszahlen und IDs gegen
+   die Sicherung vergleichen, nicht nur gegen geschätzte Sollwerte.
+8. Synchronisation kontrolliert freigeben: **`startSyncSchedule()` startet sofort
+   mit der API und danach alle fünf Minuten; es gibt keinen Pause-Schalter.**
+   Deshalb ist der Start der ersten neuen API-Instanz der Freigabepunkt für den
+   ersten Sync. Zuvor alle Offline-Prüfungen abschließen; Benutzerzugang weiter
+   gesperrt lassen. Einen Lauf überwachen, Fehler/offene Journale prüfen,
+   Gruppenklassifikation und Bestandszahlen vergleichen. Bei Abweichung API
+   sofort wieder anhalten, keine Bereinigungs-Löschungen improvisieren. Weitere
+   Replikate und externe Clients erst nach erfolgreichem Abgleich freigeben.
+9. Mit isoliertem Testadressbuch und synthetischen Kontakten CRUD, externe Änderung/
+   Konflikt, Merge, Move und Gruppen einmal durchführen. Danach Web und Benutzer-
+   zugriff freigeben. Die echten Familienkontakte sind keine Funktionstestdaten.
+
+**Wiederherstellung bei Fehlschlag:** API, Sync, Web-Schreibzugang und externe
+DAV-Schreiber erneut vollständig stoppen. Den fehlgeschlagenen Zustand inklusive
+Journal und beider DAV-Kopien zusätzlich sichern. Wenn 005/006 fehlschlägt, den
+Transaktionsstatus prüfen; keine API gegen einen teilweise aktualisierten Stand
+starten. Aus dem geprüften zusammengehörigen PostgreSQL-/Baïkal-Backup in neue
+Volumes/Instanzen wiederherstellen und vergleichen, anschließend kontrolliert
+umschalten. Nicht lediglich alten Code zurückrollen oder Spalten entfernen.
+Nach zwischenzeitlichen Schreibzugriffen würde das Vorher-Backup neue Daten
+verlieren: diese zuerst anhand der gesicherten Journale und DAV-Ressourcen
+abgleichen und gezielt übernehmen. Keine Zielkopie automatisch löschen.
+Alte Images nur zusammen mit dem vollständig zurückgespielten alten Datenstand
+starten; andernfalls auf dem neuen Stand gezielt vorwärts korrigieren.
+
+### Abschließende Abnahmetabelle
+
+| Prüfbereich | Ergebnis | Nachweis | Offene Risiken |
+| --- | --- | --- | --- |
+| Konfliktauflösung | BESTANDEN | Unit/HTTP, Desktop/Mobil, native konkurrierende API-Prozesse, externe Baïkal-Änderung | Server muss ETags korrekt durchsetzen |
+| vCard-Verarbeitung | BESTANDEN | Parser/Roundtrips, unbekannte Eigenschaften, native Baïkal-Repräsentation | Nicht unterstützte Formate werden konservativ abgewiesen |
+| Duplikat-Merge | BESTANDEN | Baïkal/Express, Mitgliedschaftserhalt, echter paralleler Sync | Keine atomare DAV-Mehrressourcen-Transaktion |
+| Kontaktverschiebung | BESTANDEN | Zwei API-Prozesse, Prozessabbruch an drei Checkpoints, idempotente Fortsetzung | Externe Änderungen können Wiederaufnahme blockieren |
+| CardDAV-Gruppen | BESTANDEN | Beide Formate, CRUD, Mitglieder, externer Rename/ETag-Konflikt, unbekannte Referenzen, Reklassifikation | Geräte-Ende-zu-Ende separat offen; weitere Server ungeprüft |
+| PostgreSQL-Mehrprozess | BESTANDEN | `test:postgres`, native Sperren, SIGKILL, Backend-Abbruch, Neustart, Journal-Restore | Kein Last-/Netzpartitionstest; Prozessneustart bei Verlust der Sperrverbindung erforderlich |
+| Android/DAVx⁵ | OFFEN | Keine passende Laufzeit/Gerät; konkrete manuelle Anleitung oben | Vollständige Kompatibilität nicht nachgewiesen |
+| Migrationen | BESTANDEN | Native 005/006, alte/neue Daten, Gruppenreferenzen, wiederholte Ausführung und Dump/Restore | Produktionsbackup und vollständige dortige Restore-Probe noch vom Betreiber durchzuführen |
+| Sicherheit | TEILWEISE GEPRÜFT | Rechte-/Sessiontests, bedingte DAV-Writes, korrigiertes Pool-Logging, Audit-Pfadanalyse | Zwei moderate Meldungen verbleiben; kein externer Penetrationstest |
+| Browser und mobile Bedienung | BESTANDEN | 11 automatisierte Chromium-Tests, Desktop/mobile Viewports | Kein manueller Gerätetest; keine vollständige Browsermatrix |
+
+**Bewertung: BEDINGT FREIGABEFÄHIG.** Die geprüften Integritätsmechanismen bestehen;
+für eine vollständige Freigabe fehlen der reale Android-/DAVx⁵-Test mit der
+vorgesehenen Kontakte-App sowie die umgebungsspezifische Backup-/Restore-Abnahme.
+Die zwei verbleibenden Audit-Meldungen müssen mit der dokumentierten begrenzten
+Erreichbarkeitsbewertung bewusst akzeptiert oder später durch geprüfte Updates
+beseitigt werden. Keine pauschale Sicherheits- oder Kompatibilitätsfreigabe.
+
+### Protokoll des abschließenden lokalen Laufs
+
+| Kommando | Ergebnis |
+| --- | --- |
+| `npm ci` | BESTANDEN; Lockfile unverändert |
+| `npm test` | BESTANDEN, 69/69, kein Skip |
+| `npm run test:browser` | BESTANDEN, 11/11 |
+| `npm run test:baikal` mit isoliertem Release | BESTANDEN, 1 Integrationstest, kein Skip |
+| `npm run test:postgres` | BESTANDEN, vollständige native Szenarienfolge oben, kein Skip |
+| `npm run build` | BESTANDEN, API und Web |
+| `tsc --noEmit` für API/Web und zusätzliche Integrationsdateien | BESTANDEN |
+| `npm audit` | TEILWEISE GEPRÜFT: Exit 1, zwei moderate Meldungen, null hoch/kritisch; Pfadbewertung oben |
+| `git diff --check` | BESTANDEN |
+
+Die CI des erweiterten Branches wird nach dem Push separat geprüft; der erfolgreiche
+Ausgangslauf #12 allein bestätigt nicht die neuen PostgreSQL-16-Tests.

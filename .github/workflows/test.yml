@@ -35,3 +35,9 @@ jobs:
       - run: npm run test:baikal
         env:
           FRIGG_BAIKAL_RELEASE: ${{ runner.temp }}/frigg-baikal-test/baikal
+      - name: Install native PostgreSQL test binaries
+        run: sudo apt-get update && sudo apt-get install -y postgresql-16 postgresql-contrib-16
+      - name: Native PostgreSQL multiprocess and recovery tests
+        run: FRIGG_TEST_PG_BIN=/usr/lib/postgresql/16/bin npm run test:postgres
+        env:
+          FRIGG_BAIKAL_RELEASE: ${{ runner.temp }}/frigg-baikal-test/baikal
