@@ -2,6 +2,7 @@ import { diagnostics, diagnosticStep } from './syncDiagnostics';
 import { createDAVClient } from 'tsdav';
 import VCF from 'vcf';
 import { projectDocument } from './vcardDocument';
+import { VCardStructureError } from './vcardStructureError';
 import { DavError, requireEtag, guardedDavFetch, resourceUrl } from './davSafety';
 import type { PhoneEntry, EmailEntry, AddressEntry } from './types';
 import { query } from './db';
@@ -159,7 +160,8 @@ export function parseVCard(raw: string, href?: string): ParsedCard | null {
     VCF.parse(raw.replace(/\r?\n/g, '\r\n'));
     return projected;
   } catch (err) {
-    diagnostics()?.failure(phase, 'parse', href, err instanceof DavError ? err.code : undefined);
+    diagnostics()?.failure(phase, 'parse', href, err instanceof DavError ? err.code : undefined,
+      err instanceof VCardStructureError ? err.subcategory : undefined);
     return null;
   }
 }

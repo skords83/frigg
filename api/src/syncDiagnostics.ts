@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHmac, randomUUID } from 'node:crypto';
 import { DavError } from './davSafety';
+import { safeStructureCategory, type VCardStructureCategory } from './vcardStructureError';
 
 type Mode = 'sync' | 'read_only';
 type Reason = 'document_parse_failed' | 'vcf_parse_failed' | 'uid_href_conflict' | 'missing_resource' | 'invalid_resource' | 'multiget_incomplete' | 'pending_operation' | 'dav_exception' | 'database_exception' | 'unexpected_exception' | 'projected_uid_null' | 'href_unique_conflict';
@@ -23,6 +24,7 @@ export class Diagnostics {
   eligible = 0;
   markers: 'unchanged' | 'advanced' | 'write_failed' = 'unchanged';
   readonly errors: Partial<Record<Reason, number>> = {};
+  readonly parserSubcategories: Partial<Record<VCardStructureCategory, number>> = {};
   private readonly seen = new Set<unknown>();
   constructor(readonly book: string, readonly mode: Mode = 'sync', private readonly key = diagnosticKey()) {}
   private ref(domain: string, value: string): string | undefined {
@@ -32,9 +34,11 @@ export class Diagnostics {
     // Diagnostics must never change synchronization control flow, even if logging fails.
     try { console.log(JSON.stringify({ event: 'sync_diagnostic', run_id: this.run, mode: this.mode, book_ref: this.ref('book', this.book), ...fields })); } catch { /* best effort */ }
   }
-  failure(reason: Reason, phase: Phase, href?: string, code?: string) {
+  failure(reason: Reason, phase: Phase, href?: string, code?: string, subcategory?: unknown) {
+    const safeSubcategory = reason === 'document_parse_failed' && code === 'invalid_vcard' ? safeStructureCategory(subcategory) : undefined;
+    if (safeSubcategory) this.parserSubcategories[safeSubcategory] = (this.parserSubcategories[safeSubcategory] ?? 0) + 1;
     this.errors[reason] = (this.errors[reason] ?? 0) + 1;
-    this.emit({ type: 'failure', reason, phase, resource_ref: href ? this.ref('resource', this.book + '\0' + href) : undefined, code: code && safeCodes.has(code) ? code : undefined });
+    this.emit({ type: 'failure', reason, phase, subcategory: safeSubcategory, resource_ref: href ? this.ref('resource', this.book + '\0' + href) : undefined, code: code && safeCodes.has(code) ? code : undefined });
   }
   exception(err: unknown, phase: Phase, href?: string) {
     if (this.seen.has(err)) return;
@@ -44,7 +48,7 @@ export class Diagnostics {
     this.failure(err instanceof DavError ? 'dav_exception' : database ? 'database_exception' : 'unexpected_exception', phase, href, typeof code === 'string' ? code : undefined);
   }
   summary() {
-    this.emit({ type: 'book_summary', listed_resources: this.listed, successful_upserts: this.upserts, eligible_resources: this.eligible, errors_by_category: this.errors, markers: this.markers, references_enabled: !!this.key });
+    this.emit({ type: 'book_summary', listed_resources: this.listed, successful_upserts: this.upserts, eligible_resources: this.eligible, errors_by_category: this.errors, parser_errors_by_subcategory: this.parserSubcategories, markers: this.markers, references_enabled: !!this.key });
   }
 }
 export function diagnostics(): Diagnostics | undefined { return context.getStore(); }

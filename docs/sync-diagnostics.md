@@ -159,3 +159,10 @@ Rückgabewerte unverändert: Ereignisse enthalten keine Referenzen und melden
 Lesemodus verlangt hingegen einen gültigen Schlüssel. Roh-vCards, Namen, UIDs,
 URLs, ETags, Sync-Token, CTags, Credentials, SQL-Details und ungefilterte Exceptions
 werden vom Diagnosecode nicht ausgegeben.
+
+## Vertiefung bei `document_parse_failed` / `invalid_vcard`
+
+Der Folgepatch liefert zusätzlich eine feste `subcategory` pro Ablehnung und
+`parser_errors_by_subcategory` pro Buch. Vollständige Bedingungen, synthetisch
+geprüfte Grenzfälle, Interoperabilitätsbefunde und die Aktualisierung des bestehenden
+Lesediagnosecontainers: [vcard-parser-diagnostics.md](vcard-parser-diagnostics.md).
